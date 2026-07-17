@@ -5,7 +5,7 @@ import './global.css';
 export default function RootLayout() {
   const pathname = usePathname();
   const { width } = useWindowDimensions();
-  const isPortal = pathname.startsWith('/vendor') || pathname.startsWith('/admin-portal');
+  const isPortal = pathname.startsWith('/vendor') || pathname.startsWith('/admin-portal') || pathname.startsWith('/cafeteria-portal');
   const buyerMobileRoutes = ['/', '/cart', '/cafeteria', '/services', '/profile', '/faq', '/delivery', '/payment', '/order', '/notifications', '/marketplace', '/supermarket'];
   const isBuyerMobileRoute = buyerMobileRoutes.some((route) => route === '/' ? pathname === route : pathname === route || pathname.startsWith(`${route}/`));
   // Onboarding and authentication deliberately use the full desktop canvas.
@@ -22,6 +22,7 @@ export default function RootLayout() {
       <Stack.Screen name="(vendor)" />
       <Stack.Screen name="vendor-portal" />
       <Stack.Screen name="admin-portal" />
+      <Stack.Screen name="cafeteria-portal" />
     </Stack>
   );
 

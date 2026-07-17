@@ -49,6 +49,8 @@ export default function Login() {
       await fetchProfile(data.user.id);
       const { data: administrator } = await supabase.from('admin_users').select('user_id').eq('user_id', data.user.id).maybeSingle();
       if (administrator) { router.replace('/admin-portal'); return; }
+      const { data: cafeteriaStaff } = await supabase.from('cafeteria_staff').select('user_id').eq('user_id', data.user.id).eq('is_active', true).maybeSingle();
+      if (cafeteriaStaff) { router.replace('/cafeteria-portal'); return; }
       const { data: vendor } = await supabase
         .from('vendors')
         .select('id')

@@ -24,6 +24,8 @@ export default function SplashScreen() {
       await useAuthStore.getState().fetchProfile(session.user.id);
       const { data: administrator } = await supabase.from('admin_users').select('user_id').eq('user_id', session.user.id).maybeSingle();
       if (administrator) { router.replace('/admin-portal'); return; }
+      const { data: cafeteriaStaff } = await supabase.from('cafeteria_staff').select('user_id').eq('user_id', session.user.id).eq('is_active', true).maybeSingle();
+      if (cafeteriaStaff) { router.replace('/cafeteria-portal'); return; }
       const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_id', session.user.id).maybeSingle();
       router.replace(session.user.user_metadata?.role === 'vendor' || vendor ? '/vendor-portal' : '/(buyer)/');
     } catch {
