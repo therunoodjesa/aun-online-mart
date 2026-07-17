@@ -4,15 +4,18 @@ import {
   Animated, Dimensions
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { useRouter } from 'expo-router';
 
 const { width, height } = Dimensions.get('window');
 
 export default function SplashScreen() {
+  const router = useRouter();
   const logoY = useRef(new Animated.Value(-400)).current;
   const logoOpacity = useRef(new Animated.Value(0)).current;
+  const poweredOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // 5 second delay then 2 second drop
+    let holdTimer: ReturnType<typeof setTimeout> | undefined;
     const timer = setTimeout(() => {
       Animated.parallel([
         Animated.timing(logoY, {
@@ -25,10 +28,20 @@ export default function SplashScreen() {
           duration: 800,
           useNativeDriver: true,
         }),
-      ]).start();
-    }, 1000);
+      ]).start(() => {
+        Animated.timing(poweredOpacity, {
+          toValue: 1,
+          duration: 350,
+          useNativeDriver: true,
+        }).start();
+        holdTimer = setTimeout(() => router.replace('/onboarding'), 5000);
+      });
+  }, 1000);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      if (holdTimer) clearTimeout(holdTimer);
+    };
   }, []);
 
   return (
@@ -49,6 +62,7 @@ export default function SplashScreen() {
           resizeMode="contain"
         />
       </Animated.View>
+      <Animated.Text style={[styles.powered, { opacity: poweredOpacity }]}>Powered by iRO TECH</Animated.Text>
     </View>
   );
 }
@@ -67,5 +81,14 @@ const styles = StyleSheet.create({
   logo: {
     width: '100%',
     height: '100%',
+  },
+  powered: {
+    position: 'absolute',
+    bottom: 42,
+    alignSelf: 'center',
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 0.4,
   },
 });

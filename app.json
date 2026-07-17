@@ -2,7 +2,27 @@
   "expo": {
     "name": "AUN Online Mart",
     "slug": "aun-online-mart",
+    "scheme": "aunonlinemart",
     "version": "1.0.0",
-    "orientation": "portrait"
+    "orientation": "portrait",
+    "extra": {
+      "eas": {
+        "projectId": "cb7a38fe-e03e-40ad-8c90-95337b7dbc4c"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "aunonlinemart.com",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "owner": "therunoodjesa",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/cb7a38fe-e03e-40ad-8c90-95337b7dbc4c"
+    },
+    "android": {}
   }
 }
