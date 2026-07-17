@@ -14,10 +14,14 @@ Deno.serve(async (request) => {
     if (transaction.status !== 'success') { await db.from('payment_intents').update({ status: transaction.status ?? 'pending' }).eq('id', intent.id); return json({ status: transaction.status ?? 'pending', message: transaction.gateway_response ?? 'Payment is still being confirmed.' }); }
     const expectedAmount = Number(intent.amount_kobo);
     const chargedAmount = Number(transaction.amount);
+    // Paystack can pass its processing fee to the customer. In that case
+    // `amount` is higher than AOM's invoice while `requested_amount` remains
+    // the amount AOM asked Paystack to collect.
+    const requestedAmount = Number(transaction.requested_amount ?? transaction.amount);
     const currency = String(transaction.currency ?? '').toUpperCase();
-    if (chargedAmount !== expectedAmount || currency !== 'NGN') {
-      console.error('Paystack payment mismatch', { reference, expectedAmount, chargedAmount, currency, requestedAmount: transaction.requested_amount ?? null });
-      return json({ error: `Payment could not be verified safely. AOM expected ₦${(expectedAmount / 100).toLocaleString('en-NG')}; Paystack returned ₦${(chargedAmount / 100).toLocaleString('en-NG')} ${currency || 'with no currency code'}.` }, 400);
+    if (requestedAmount !== expectedAmount || chargedAmount < expectedAmount || currency !== 'NGN') {
+      console.error('Paystack payment mismatch', { reference, expectedAmount, requestedAmount, chargedAmount, currency });
+      return json({ error: `Payment could not be verified safely. AOM expected ₦${(expectedAmount / 100).toLocaleString('en-NG')}; Paystack requested ₦${(requestedAmount / 100).toLocaleString('en-NG')} and charged ₦${(chargedAmount / 100).toLocaleString('en-NG')} ${currency || 'with no currency code'}.` }, 400);
     }
     const cart = intent.cart as { lines: { product_id: string; product_name: string; unit_price: number; quantity: number; selected_options: unknown[]; note: string | null }[]; subtotal: number; total: number };
     const orderNumber = `AOM-${String(Date.now()).slice(-7)}`;

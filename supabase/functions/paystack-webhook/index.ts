@@ -78,7 +78,13 @@ Deno.serve(async (request) => {
     const transaction = event.data;
     const db = admin();
     const { data: intent } = await db.from('payment_intents').select('*').eq('reference', transaction.reference).maybeSingle();
-    if (!intent || Number(transaction.amount) !== Number(intent.amount_kobo) || transaction.currency !== 'NGN') return json({ received: true });
+    const expectedAmount = Number(intent?.amount_kobo);
+    const requestedAmount = Number(transaction.requested_amount ?? transaction.amount);
+    const chargedAmount = Number(transaction.amount);
+    const currency = String(transaction.currency ?? '').toUpperCase();
+    // `amount` may include a Paystack fee passed to the customer. The invoice
+    // is represented by requested_amount; never accept a partial charge.
+    if (!intent || requestedAmount !== expectedAmount || chargedAmount < expectedAmount || currency !== 'NGN') return json({ received: true });
     const orderId = await finalisePaidIntent(db, intent as typeof intent & { user_id: string; fulfilment: string; delivery_address: string | null; delivery_slot: string | null; cart: StoredCart }, Number(transaction.id));
     await startPaidOrderMessages(orderId);
     return json({ received: true, order_id: orderId });
