@@ -20,6 +20,7 @@ const CATEGORIES = [
   { label: 'Fast food', image: require('../../assets/images/home/fastfood.png') },
   { label: 'Ice-cream', image: require('../../assets/images/home/category-ice-cream.png') },
   { label: 'Dairy', image: require('../../assets/images/home/dairy.png') },
+  { label: 'Drinks', image: require('../../assets/images/home/Sprite.png') },
 ];
 const PRODUCTS: { id: string; name: string; vendor: string; price: number; icon: Icon }[] = [
   { id: 'shawarma', name: 'Chicken shawarma', vendor: 'Btee treats & farms', price: 4500, icon: 'fast-food-outline' },
