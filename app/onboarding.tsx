@@ -247,6 +247,7 @@ export default function Onboarding() {
   const router = useRouter();
   const listRef = useRef<FlatList<Slide>>(null);
   const { width, height } = useWindowDimensions();
+  const slideHeight = Math.max(1, height - 90);
   const [currentIndex, setCurrentIndex] = useState(0);
 
   const moveTo = (index: number) => {
@@ -257,8 +258,8 @@ export default function Onboarding() {
   const next = () => currentIndex === SLIDES.length - 1 ? finish() : moveTo(currentIndex + 1);
 
   const renderSlide = ({ item, index }: { item: Slide; index: number }) => (
-    <View style={[styles.page, { width, height }]}>
-      <ScrollView style={styles.slideScroll} contentContainerStyle={[styles.slideContent, { minHeight: item.id === 'repeat' ? height + 230 : height }]} showsVerticalScrollIndicator={false}>
+    <View style={[styles.page, { width, height: slideHeight }]}>
+      <ScrollView style={styles.slideScroll} contentContainerStyle={[styles.slideContent, { minHeight: item.id === 'repeat' ? slideHeight + 230 : slideHeight }]} showsVerticalScrollIndicator={false}>
         <View style={[styles.topBar, item.id === 'repeat' && { paddingHorizontal: Math.max(30, (width - Math.min(370, width - 60)) / 2) }]}>
           <Text style={styles.step}>{`${index + 1} of ${SLIDES.length}`}</Text>
           <TouchableOpacity onPress={finish} accessibilityRole="button" accessibilityLabel="Skip onboarding" hitSlop={10}>
@@ -268,7 +269,7 @@ export default function Onboarding() {
         {item.id === 'shop' && <ShopSlide slide={item} pageWidth={width} />}
         {item.id === 'sell' && <SellSlide slide={item} pageWidth={width} />}
         {item.id === 'deliver' && <DeliverSlide slide={item} pageWidth={width} />}
-        {item.id === 'repeat' && <RepeatSlide slide={item} pageWidth={width} pageHeight={height} />}
+        {item.id === 'repeat' && <RepeatSlide slide={item} pageWidth={width} pageHeight={slideHeight} />}
       </ScrollView>
     </View>
   );
@@ -313,7 +314,7 @@ const styles = StyleSheet.create({
   slideList: { flex: 1 },
   page: { backgroundColor: COLORS.navy, overflow: 'hidden' },
   slideScroll: { flex: 1 },
-  slideContent: { position: 'relative', paddingBottom: 115 },
+  slideContent: { position: 'relative', paddingBottom: 28 },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 30, paddingTop: 42 },
   step: { color: COLORS.muted, fontSize: 16 },
   skip: { color: COLORS.muted, fontSize: 16, fontWeight: '600' },
@@ -354,7 +355,7 @@ const styles = StyleSheet.create({
   permissionCopy: { flex: 1 }, permissionTitle: { color: COLORS.cream, fontSize: 16, fontWeight: '600', marginBottom: 3 },
   permissionDetail: { color: COLORS.muted, fontSize: 15 }, permissionDivider: { height: 1, backgroundColor: 'rgba(160,160,160,0.5)' },
   repeatBottom: { position: 'absolute', top: 600, left: 28, width: 370 },
-  navigation: { position: 'absolute', left: 21, right: 35, bottom: 21, height: 69, flexDirection: 'row', gap: 4 },
+  navigation: { minHeight: 90, paddingTop: 10, paddingBottom: 21, paddingLeft: 21, paddingRight: 35, flexDirection: 'row', gap: 4 },
   navigationFirst: { left: 34 },
   backButton: { width: 96, height: 55, borderRadius: 8, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center' },
   nextButton: { flex: 1, height: 55, borderRadius: 8, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center' },
