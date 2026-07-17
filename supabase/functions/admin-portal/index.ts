@@ -18,7 +18,7 @@ async function requireAdmin(request: Request) {
 }
 
 async function dashboard(db: ReturnType<typeof admin>) {
-  const [{ count: pendingTransferCount }, { count: pendingVendorCount }, { count: paidOrderCount }, { count: pendingPayoutCount }, { count: dispatchCount }, { data: intents, error: intentError }, { data: applications, error: applicationError }, { data: payoutRows, error: payoutError }, { data: dispatchRows, error: dispatchError }, { data: riderRows, error: riderError }] = await Promise.all([
+  const [{ count: pendingTransferCount }, { count: pendingVendorCount }, { count: paidOrderCount }, { count: pendingPayoutCount }, { count: dispatchCount }, { data: intents, error: intentError }, { data: applications, error: applicationError }, { data: payoutRows, error: payoutError }, { data: dispatchRows, error: dispatchError }, { data: riderRows, error: riderError }, { data: allOrders, error: allOrdersError }] = await Promise.all([
     db.from('payment_intents').select('*', { count: 'exact', head: true }).eq('payment_channel', 'bank_transfer').eq('status', 'pending'),
     db.from('vendor_applications').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
     db.from('orders').select('*', { count: 'exact', head: true }).eq('payment_status', 'paid'),
@@ -29,12 +29,14 @@ async function dashboard(db: ReturnType<typeof admin>) {
     db.from('vendor_payout_requests').select('id, vendor_id, amount, status, requested_at, processed_at, reference, note').in('status', ['requested', 'processing']).order('requested_at', { ascending: true }).limit(50),
     db.from('orders').select('id, order_number, status, delivery_type, delivery_address, delivery_slot, rider_name, rider_phone, rider_assigned_at, dispatch_status, created_at').eq('payment_status', 'paid').in('status', ['ready', 'out_for_delivery']).order('created_at', { ascending: true }).limit(50),
     db.from('delivery_riders').select('id, full_name, phone, accepts_calls, accepts_whatsapp, coverage_area, availability').eq('availability', 'active').order('full_name'),
+    db.from('orders').select('id, order_number, status, payment_status, delivery_type, delivery_address, delivery_slot, total, amount_paid, created_at').order('created_at', { ascending: false }).limit(100),
   ]);
   if (intentError) throw new Error(intentError.message);
   if (applicationError) throw new Error(applicationError.message);
   if (payoutError) throw new Error(payoutError.message);
   if (dispatchError) throw new Error(dispatchError.message);
   if (riderError) throw new Error(riderError.message);
+  if (allOrdersError) throw new Error(allOrdersError.message);
 
   const orderIds = (intents ?? []).map((intent) => intent.order_id).filter(Boolean);
   const { data: orders, error: ordersError } = orderIds.length
@@ -47,6 +49,43 @@ async function dashboard(db: ReturnType<typeof admin>) {
   if (vendorsError) throw new Error(vendorsError.message);
   const vendorById = new Map((vendors ?? []).map((vendor) => [vendor.id, vendor]));
 
+  const allOrderIds = (allOrders ?? []).map((order) => order.id);
+  const { data: orderItems, error: itemsError } = allOrderIds.length
+    ? await db.from('order_items').select('order_id, product_id, product_name, quantity').in('order_id', allOrderIds)
+    : { data: [], error: null };
+  if (itemsError) throw new Error(itemsError.message);
+  const productIds = [...new Set((orderItems ?? []).map((item) => item.product_id).filter(Boolean))];
+  const { data: orderProducts, error: productsError } = productIds.length
+    ? await db.from('products').select('id, vendor_id').in('id', productIds)
+    : { data: [], error: null };
+  if (productsError) throw new Error(productsError.message);
+  const productVendorById = new Map((orderProducts ?? []).map((product) => [product.id, product.vendor_id]));
+  const allVendorIds = [...new Set((orderProducts ?? []).map((product) => product.vendor_id).filter(Boolean))];
+  const { data: orderVendors, error: orderVendorsError } = allVendorIds.length
+    ? await db.from('vendors').select('id, name, owner_id, pickup_location').in('id', allVendorIds)
+    : { data: [], error: null };
+  if (orderVendorsError) throw new Error(orderVendorsError.message);
+  const ownerIds = [...new Set((orderVendors ?? []).map((vendor) => vendor.owner_id).filter(Boolean))];
+  const { data: vendorContacts, error: contactsError } = ownerIds.length
+    ? await db.from('vendor_applications').select('user_id, contact_name, phone').in('user_id', ownerIds)
+    : { data: [], error: null };
+  if (contactsError) throw new Error(contactsError.message);
+  const contactByOwnerId = new Map((vendorContacts ?? []).map((contact) => [contact.user_id, contact]));
+  const fullVendorById = new Map((orderVendors ?? []).map((vendor) => [vendor.id, { ...vendor, contact: vendor.owner_id ? contactByOwnerId.get(vendor.owner_id) ?? null : null }]));
+  const itemsByOrderId = new Map<string, typeof orderItems>();
+  for (const item of orderItems ?? []) itemsByOrderId.set(item.order_id, [...(itemsByOrderId.get(item.order_id) ?? []), item]);
+  const adminOrders = (allOrders ?? []).map((order) => {
+    const items = itemsByOrderId.get(order.id) ?? [];
+    const vendorIdsForOrder = [...new Set(items.map((item) => productVendorById.get(item.product_id)).filter(Boolean))] as string[];
+    return {
+      ...order,
+      item_summary: items.map((item) => `${item.quantity}× ${item.product_name}`).join(', ') || 'Order items unavailable',
+      vendors: vendorIdsForOrder.length
+        ? vendorIdsForOrder.map((vendorId) => fullVendorById.get(vendorId)).filter(Boolean)
+        : [{ id: 'cafeteria', name: 'AUN Cafeteria', pickup_location: 'University cafeteria', contact: null }],
+    };
+  });
+
   return {
     metrics: { pending_transfers: pendingTransferCount ?? 0, pending_vendor_applications: pendingVendorCount ?? 0, paid_orders: paidOrderCount ?? 0, pending_payouts: pendingPayoutCount ?? 0, dispatch_queue: dispatchCount ?? 0 },
     pending_transfers: (intents ?? []).map((intent) => ({ ...intent, order: intent.order_id ? orderById.get(intent.order_id) ?? null : null })),
@@ -54,6 +93,7 @@ async function dashboard(db: ReturnType<typeof admin>) {
     pending_payouts: (payoutRows ?? []).map((payout) => ({ ...payout, vendor: vendorById.get(payout.vendor_id) ?? null })),
     dispatch_queue: dispatchRows ?? [],
     delivery_riders: riderRows ?? [],
+    orders: adminOrders,
   };
 }
 
