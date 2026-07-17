@@ -5,8 +5,12 @@ import './global.css';
 export default function RootLayout() {
   const pathname = usePathname();
   const { width } = useWindowDimensions();
-  const isPortal = pathname.startsWith('/vendor-portal') || pathname.startsWith('/admin-portal');
-  const useBuyerFrame = Platform.OS === 'web' && width >= 680 && !isPortal;
+  const isPortal = pathname.startsWith('/vendor') || pathname.startsWith('/admin-portal');
+  const buyerMobileRoutes = ['/', '/cart', '/cafeteria', '/services', '/profile', '/faq', '/delivery', '/payment', '/order', '/notifications', '/marketplace', '/supermarket'];
+  const isBuyerMobileRoute = buyerMobileRoutes.some((route) => route === '/' ? pathname === route : pathname === route || pathname.startsWith(`${route}/`));
+  // Onboarding and authentication deliberately use the full desktop canvas.
+  // The buyer marketplace remains presented as a mobile app on wide browsers.
+  const useBuyerFrame = Platform.OS === 'web' && width >= 680 && !isPortal && isBuyerMobileRoute;
 
   const navigator = (
     <Stack screenOptions={{ headerShown: false }}>
