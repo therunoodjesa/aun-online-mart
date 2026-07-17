@@ -151,7 +151,10 @@ export default function PaymentPage() {
   };
 
   useEffect(() => {
-    if (!paymentReference || !items.length) return;
+    // The Paystack callback can open in a fresh browser tab. Its cart state
+    // may not be available there, but the returned payment reference is
+    // enough for the server to verify and open the completed order.
+    if (!paymentReference) return;
     const verifyWhenActive = (nextState: string) => {
       if (nextState === 'active' && checkoutOpenedRef.current) {
         setReturnedFromCheckout(true);
