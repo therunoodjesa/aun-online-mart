@@ -21,7 +21,8 @@ const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
 export default function MarketplaceCategoryPage() {
   const router = useRouter();
   const { category } = useLocalSearchParams<{ category: string }>();
-  const { width } = useWindowDimensions();
+  const { width: viewportWidth } = useWindowDimensions();
+  const width = Math.min(viewportWidth, 430);
   const key = (category ?? 'meals').toLowerCase();
   const config = CATEGORY_CONFIG[key] ?? CATEGORY_CONFIG.meals;
   const [products, setProducts] = useState<CategoryProduct[]>([]);

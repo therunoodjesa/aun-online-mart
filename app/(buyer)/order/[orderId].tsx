@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Dimensions, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -16,9 +16,6 @@ const PICKUP_STEPS = [
   ['pending', 'Order received and processing'], ['accepted', 'Vendor has accepted your order'], ['preparing', 'Your order is being prepared'], ['ready', 'Your order is ready for collection'], ['delivered', 'Order collected successfully'],
 ] as const;
 const STATUS_ORDER = ['pending', 'accepted', 'preparing', 'ready', 'out_for_delivery', 'delivered'];
-const { width } = Dimensions.get('window');
-const S = Platform.OS === 'web' ? 1 : width / 430;
-
 export default function OrderDetailsPage() {
   const router = useRouter();
   const { orderId, fulfilment, address } = useLocalSearchParams<{ orderId: string; fulfilment?: string; address?: string }>();

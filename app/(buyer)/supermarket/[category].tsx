@@ -42,7 +42,8 @@ const money = (amount: number) => `₦ ${Number(amount ?? 0).toLocaleString('en-
 export default function SupermarketCategoryPage() {
   const router = useRouter();
   const { category } = useLocalSearchParams<{ category: string }>();
-  const { width } = useWindowDimensions();
+  const { width: viewportWidth } = useWindowDimensions();
+  const width = Math.min(viewportWidth, 430);
   const key = (category ?? 'all-products').toLowerCase();
   const config = CATEGORY_CONFIG[key] ?? CATEGORY_CONFIG['all-products'];
   const [products, setProducts] = useState<Product[]>([]);

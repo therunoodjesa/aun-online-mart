@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  ScrollView, Image, Dimensions, Platform,
+  ScrollView, Image,
   ActivityIndicator, Alert
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -13,8 +13,7 @@ import { FavouriteButton } from '../../../components/FavouriteButton';
 import { isFavourited } from '../../../lib/favourites';
 import { CartToast } from '../../../components/CartToast';
 
-const { width } = Dimensions.get('window');
-const S = Platform.OS === 'web' ? 1 : width / 430;
+const S = 1;
 
 type Product = {
   id: string;
@@ -404,7 +403,7 @@ const styles = StyleSheet.create({
   },
   retryText: { fontSize: 14 * S, fontWeight: '600', color: '#01193D' },
 
-  banner: { width, height: 220 * S, position: 'relative', overflow: 'hidden', borderBottomLeftRadius: 15, borderBottomRightRadius: 15 },
+  banner: { width: '100%', height: 220 * S, position: 'relative', overflow: 'hidden', borderBottomLeftRadius: 15, borderBottomRightRadius: 15 },
   bannerImg: { width: '100%', height: '100%', resizeMode: 'cover', borderBottomLeftRadius: 15, borderBottomRightRadius: 15 },
   bannerPlaceholder: {
     width: '100%', height: '100%',

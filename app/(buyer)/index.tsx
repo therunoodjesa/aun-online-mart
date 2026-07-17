@@ -87,7 +87,8 @@ function ProductCard({ item, width, quantity, change, addToCart }: { item: typeo
 
 export default function BuyerHome() {
   const router = useRouter();
-  const { width } = useWindowDimensions();
+  const { width: viewportWidth } = useWindowDimensions();
+  const width = Math.min(viewportWidth, 430);
   const profile = useAuthStore((state) => state.profile);
   const [section, setSection] = useState<Section>('marketplace');
   const [activeCategory, setActiveCategory] = useState('Meals');

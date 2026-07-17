@@ -28,7 +28,8 @@ function calendarDays(month: Date) {
 export default function ServiceBookingPage() {
   const router = useRouter();
   const { serviceId } = useLocalSearchParams<{ serviceId: string }>();
-  const { width } = useWindowDimensions();
+  const { width: viewportWidth } = useWindowDimensions();
+  const width = Math.min(viewportWidth, 430);
   const { addItem } = useCartStore();
   const service: BookingService = FALLBACK_SERVICE; // Live service catalogue fields can be connected here as providers add service options.
   const today = useMemo(() => new Date(), []);

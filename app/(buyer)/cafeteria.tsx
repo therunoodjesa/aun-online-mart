@@ -20,7 +20,8 @@ const money = (price: number) => `₦ ${Number(price).toLocaleString('en-NG')}`;
 export default function CafeteriaPage() {
   const router = useRouter();
   const { category: categoryParam } = useLocalSearchParams<{ category?: Category }>();
-  const { width } = useWindowDimensions();
+  const { width: viewportWidth } = useWindowDimensions();
+  const width = Math.min(viewportWidth, 430);
   const [category, setCategory] = useState<Category>(categoryParam === 'lunch' || categoryParam === 'dinner' ? categoryParam : 'snacks');
   const [products, setProducts] = useState<Product[]>([]);
   const [query, setQuery] = useState('');

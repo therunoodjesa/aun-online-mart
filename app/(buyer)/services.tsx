@@ -24,7 +24,8 @@ const fallbackCard: Service = { id: FALLBACK_SERVICE.id, name: FALLBACK_SERVICE.
 
 export default function ServicesPage() {
   const router = useRouter();
-  const { width } = useWindowDimensions();
+  const { width: viewportWidth } = useWindowDimensions();
+  const width = Math.min(viewportWidth, 430);
   const [services, setServices] = useState<Service[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
