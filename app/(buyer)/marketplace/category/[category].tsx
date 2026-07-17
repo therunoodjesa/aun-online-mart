@@ -16,6 +16,7 @@ const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
   'fast-food': { title: 'Fast food', description: 'Quick, satisfying favourites made for busy days and late cravings.', image: require('../../../../assets/images/home/fastfood.png'), subcategories: ['Burgers', 'Shawarma', 'Snacks', 'Combos'] },
   'ice-cream': { title: 'Ice-cream', description: 'Cool down with sweet scoops, sundaes and frozen treats.', image: require('../../../../assets/images/home/category-ice-cream.png'), subcategories: ['Scoops', 'Sundaes', 'Milkshakes', 'Toppings'] },
   dairy: { title: 'Dairy', description: 'Everyday dairy essentials, chilled and ready when you need them.', image: require('../../../../assets/images/home/dairy.png'), subcategories: ['Milk', 'Yoghurt', 'Cheese', 'Cream'] },
+  drinks: { title: 'Drinks', description: 'Refresh yourself with a variety of beverages.', image: require('../../../../assets/images/home/Sprite.png'), subcategories: ['Sodas', 'Juices', 'Mocktails', 'Teas'] },
 };
 
 export default function MarketplaceCategoryPage() {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -8,6 +8,8 @@ import { supabase } from '../../../lib/supabase';
 type OrderRecord = { order_number: string; status: string; delivery_type: string; created_at: string };
 type OrderUpdate = { id: string; message: string; update_type: 'system' | 'vendor'; created_at: string };
 type TrackingUpdate = OrderUpdate & { pending?: boolean };
+type ReplacementProduct = { id: string; name: string; price: number; image_url?: string | null; category?: string | null };
+type RejectionRequest = { id: string; reason: string; other_reason: string | null; alternative_products: ReplacementProduct[]; selected_product_name: string | null; status: 'pending_customer' | 'replacement_selected' | 'cancelled' };
 
 const DELIVERY_STEPS = [
   ['pending', 'Order received and processing'], ['accepted', 'Vendor has accepted your order'], ['preparing', 'Your order is being prepared'], ['ready', 'Your order is packed and ready'], ['out_for_delivery', 'Order has been handed to the rider'], ['delivered', 'Order delivered successfully'],
@@ -21,6 +23,8 @@ export default function OrderDetailsPage() {
   const { orderId, fulfilment, address } = useLocalSearchParams<{ orderId: string; fulfilment?: string; address?: string }>();
   const [order, setOrder] = useState<OrderRecord | null>(null);
   const [customUpdates, setCustomUpdates] = useState<OrderUpdate[]>([]);
+  const [rejectionRequest, setRejectionRequest] = useState<RejectionRequest | null>(null);
+  const [responding, setResponding] = useState(false);
   const [loading, setLoading] = useState(orderId !== 'preview');
   const isPickup = fulfilment === 'pickup' || order?.delivery_type === 'pickup';
 
@@ -28,17 +32,19 @@ export default function OrderDetailsPage() {
     const loadOrder = async () => {
       if (!orderId || orderId === 'preview') { setLoading(false); return; }
       setLoading(true);
-      const [{ data: orderData }, { data: updatesData }] = await Promise.all([
+      const [{ data: orderData }, { data: updatesData }, { data: rejectionData }] = await Promise.all([
         supabase.from('orders').select('order_number, status, delivery_type, created_at').eq('id', orderId).single(),
         supabase.from('order_updates').select('id, message, update_type, created_at').eq('order_id', orderId).order('created_at', { ascending: false }).limit(3),
+        supabase.from('order_rejection_requests').select('id, reason, other_reason, alternative_products, selected_product_name, status').eq('order_id', orderId).maybeSingle(),
       ]);
       if (orderData) setOrder(orderData as OrderRecord);
       setCustomUpdates((updatesData ?? []) as OrderUpdate[]);
+      setRejectionRequest((rejectionData ?? null) as RejectionRequest | null);
       setLoading(false);
     };
     void loadOrder();
     if (!orderId || orderId === 'preview') return;
-    const channel = supabase.channel(`order-updates-${orderId}`).on('postgres_changes', { event: '*', schema: 'public', table: 'order_updates', filter: `order_id=eq.${orderId}` }, loadOrder).on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${orderId}` }, loadOrder).subscribe();
+    const channel = supabase.channel(`order-updates-${orderId}`).on('postgres_changes', { event: '*', schema: 'public', table: 'order_updates', filter: `order_id=eq.${orderId}` }, loadOrder).on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${orderId}` }, loadOrder).on('postgres_changes', { event: '*', schema: 'public', table: 'order_rejection_requests', filter: `order_id=eq.${orderId}` }, loadOrder).subscribe();
     return () => { void supabase.removeChannel(channel); };
   }, [orderId]);
 
@@ -54,6 +60,15 @@ export default function OrderDetailsPage() {
 
   const orderNumber = order?.order_number ?? 'Preview';
   const finalStatus = order?.status === 'delivered';
+  const respondToReplacement = async (action: 'select' | 'cancel', productId?: string) => {
+    if (!rejectionRequest) return;
+    setResponding(true);
+    const { data, error } = await supabase.functions.invoke('buyer-order-replacement', { body: { request_id: rejectionRequest.id, action, product_id: productId } });
+    setResponding(false);
+    if (error || data?.error) { Alert.alert('Could not update order', data?.error ?? error?.message ?? 'Please try again.'); return; }
+    Alert.alert(action === 'select' ? 'Replacement selected' : 'Order cancelled', action === 'select' ? 'The vendor has been notified of your choice.' : 'AOM will process your refund manually.');
+    void (async () => { const { data: refreshed } = await supabase.from('order_rejection_requests').select('id, reason, other_reason, alternative_products, selected_product_name, status').eq('id', rejectionRequest.id).maybeSingle(); setRejectionRequest((refreshed ?? null) as RejectionRequest | null); })();
+  };
   if (loading) return <View style={styles.loading}><ActivityIndicator size="large" color="#68ECCB" /></View>;
 
   return <View style={styles.screen}><StatusBar style="light" /><View style={styles.page}>
@@ -62,6 +77,9 @@ export default function OrderDetailsPage() {
       <View style={styles.steps}><View style={styles.step}><Ionicons name="checkmark" size={16} color="#FFFFFF" /></View><View style={styles.stepLine} /><View style={styles.step}><Ionicons name="checkmark" size={16} color="#FFFFFF" /></View><View style={styles.stepLine} /><View style={styles.step}><Ionicons name="checkmark" size={16} color="#FFFFFF" /></View><View style={styles.stepLine} /><View style={styles.step}><Ionicons name="checkmark" size={16} color="#FFFFFF" /></View></View>
       <View style={styles.orderBanner}><Text style={styles.orderLabel}>Order Number</Text><View style={styles.orderNo}><Text style={styles.orderNoText}>{orderNumber}</Text></View></View>
       <View style={styles.meta}><View><Text style={styles.metaLabel}>{isPickup ? 'Pickup time' : 'Delivery time'}</Text><Text style={styles.metaLabel}>{isPickup ? 'Pickup location' : 'Dropoff location'}</Text></View><View style={styles.metaRight}><Text style={styles.metaValue}>{isPickup ? 'Ready in ~15 mins' : 'Estimated shortly'}</Text><Text style={styles.metaValue}>{isPickup ? 'Vendor pickup point' : address || 'American University of Nigeria'}</Text></View></View>
+      {rejectionRequest?.status === 'pending_customer' ? <View style={styles.replacementCard}><View style={styles.replacementTop}><Ionicons name="swap-horizontal-outline" size={22} color="#9A6200" /><Text style={styles.replacementTitle}>Choose a replacement</Text></View><Text style={styles.replacementCopy}>{rejectionRequest.reason === 'out_of_stock' ? 'An item in your order is out of stock. Pick another available item from this vendor, or cancel the order.' : rejectionRequest.other_reason || 'The vendor cannot fulfil this order.'}</Text>{rejectionRequest.alternative_products.map((product) => <TouchableOpacity key={product.id} disabled={responding} onPress={() => void respondToReplacement('select', product.id)} style={styles.replacementOption}><View style={{ flex: 1 }}><Text style={styles.replacementName}>{product.name}</Text><Text style={styles.replacementPrice}>₦{Number(product.price).toLocaleString('en-NG')}</Text></View><Ionicons name="arrow-forward-circle" size={25} color="#176E73" /></TouchableOpacity>)}<TouchableOpacity disabled={responding} onPress={() => void respondToReplacement('cancel')} style={styles.cancelReplacement}>{responding ? <ActivityIndicator color="#9D4538" /> : <Text style={styles.cancelReplacementText}>No thanks — cancel and refund manually</Text>}</TouchableOpacity></View> : null}
+      {rejectionRequest?.status === 'replacement_selected' ? <View style={styles.replacementSelected}><Ionicons name="checkmark-circle" size={21} color="#176E73" /><Text style={styles.replacementSelectedText}>You selected {rejectionRequest.selected_product_name ?? 'a replacement'}. The vendor has been notified.</Text></View> : null}
+      {rejectionRequest?.status === 'cancelled' ? <View style={styles.replacementCancelled}><Ionicons name="information-circle" size={21} color="#9D4538" /><Text style={styles.replacementCancelledText}>This order was cancelled. AOM will process your refund manually.</Text></View> : null}
       <View style={styles.timeline}>{updates.map((update, index) => <View key={update.id} style={[styles.updateLayer, { top: index * 72, zIndex: 3 - index }]}><View style={[styles.segment, index === 0 && styles.segmentLatest, index === 1 && styles.segmentMiddle, index === 2 && styles.segmentOldest]} /><View style={styles.updateCopy}><Text style={[styles.updateText, index === 0 && !update.pending && styles.updateTextLatest, update.pending && styles.updateTextPending]}>{update.message}</Text>{update.update_type === 'vendor' && <Text style={styles.vendorTag}>Vendor update</Text>}</View></View>)}</View>
       <TouchableOpacity style={styles.homeButton} onPress={() => router.replace('/(buyer)/')}><Text style={styles.homeText}>BACK TO HOME</Text></TouchableOpacity>
     </ScrollView>
@@ -113,4 +131,5 @@ const styles = StyleSheet.create({
   vendorTag: { color: '#005B3B', fontSize: 12, lineHeight: 16, marginTop: 4 },
   homeButton: { width: 265, height: 70, marginTop: 20, alignSelf: 'center', borderRadius: 10, backgroundColor: '#01193D', alignItems: 'center', justifyContent: 'center' },
   homeText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
+  replacementCard: { marginTop: 8, borderRadius: 14, borderWidth: 1, borderColor: '#E8C677', backgroundColor: '#FFF9ED', padding: 15 }, replacementTop: { flexDirection: 'row', alignItems: 'center', gap: 8 }, replacementTitle: { color: '#7A4C00', fontSize: 16, fontWeight: '800' }, replacementCopy: { color: '#735F3E', fontSize: 13, lineHeight: 19, marginTop: 8, marginBottom: 8 }, replacementOption: { minHeight: 56, marginTop: 8, paddingHorizontal: 12, borderRadius: 10, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#DCE3E7', flexDirection: 'row', alignItems: 'center', gap: 10 }, replacementName: { color: '#01193D', fontSize: 14, fontWeight: '800' }, replacementPrice: { color: '#176E73', fontSize: 13, fontWeight: '700', marginTop: 2 }, cancelReplacement: { minHeight: 43, marginTop: 13, borderRadius: 9, borderWidth: 1, borderColor: '#D98A80', alignItems: 'center', justifyContent: 'center' }, cancelReplacementText: { color: '#9D4538', fontSize: 13, fontWeight: '800' }, replacementSelected: { marginTop: 8, padding: 13, borderRadius: 12, backgroundColor: '#E1F6F0', flexDirection: 'row', alignItems: 'center', gap: 9 }, replacementSelectedText: { flex: 1, color: '#176E73', fontSize: 13, fontWeight: '700', lineHeight: 18 }, replacementCancelled: { marginTop: 8, padding: 13, borderRadius: 12, backgroundColor: '#FFF0EE', flexDirection: 'row', alignItems: 'center', gap: 9 }, replacementCancelledText: { flex: 1, color: '#9D4538', fontSize: 13, fontWeight: '700', lineHeight: 18 },
 });
