@@ -12,7 +12,13 @@ Deno.serve(async (request) => {
     if (intent.status === 'paid' && intent.order_id) return json({ status: 'paid', order_id: intent.order_id });
     const transaction = await paystack(`/transaction/verify/${encodeURIComponent(reference)}`);
     if (transaction.status !== 'success') { await db.from('payment_intents').update({ status: transaction.status ?? 'pending' }).eq('id', intent.id); return json({ status: transaction.status ?? 'pending', message: transaction.gateway_response ?? 'Payment is still being confirmed.' }); }
-    if (Number(transaction.amount) !== Number(intent.amount_kobo) || transaction.currency !== 'NGN') return json({ error: 'Payment amount could not be verified.' }, 400);
+    const expectedAmount = Number(intent.amount_kobo);
+    const chargedAmount = Number(transaction.amount);
+    const currency = String(transaction.currency ?? '').toUpperCase();
+    if (chargedAmount !== expectedAmount || currency !== 'NGN') {
+      console.error('Paystack payment mismatch', { reference, expectedAmount, chargedAmount, currency, requestedAmount: transaction.requested_amount ?? null });
+      return json({ error: `Payment could not be verified safely. AOM expected ₦${(expectedAmount / 100).toLocaleString('en-NG')}; Paystack returned ₦${(chargedAmount / 100).toLocaleString('en-NG')} ${currency || 'with no currency code'}.` }, 400);
+    }
     const cart = intent.cart as { lines: { product_id: string; product_name: string; unit_price: number; quantity: number; selected_options: unknown[]; note: string | null }[]; subtotal: number; total: number };
     const orderNumber = `AOM-${String(Date.now()).slice(-7)}`;
     const { data: order, error: orderError } = await db.from('orders').insert({ order_number: orderNumber, user_id: user.id, status: 'pending', delivery_type: intent.fulfilment, payment_status: 'paid', payment_reference: reference, amount_paid: cart.total, subtotal: cart.subtotal, total: cart.total, delivery_address: intent.delivery_address, delivery_slot: intent.delivery_slot }).select('id').single();
