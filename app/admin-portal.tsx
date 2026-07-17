@@ -12,7 +12,7 @@ type DispatchOrder = { id: string; order_number: string; status: 'ready' | 'out_
 type Rider = { id: string; full_name: string; phone: string; accepts_calls: boolean; accepts_whatsapp: boolean; coverage_area: string | null; availability: 'active' };
 type OrderVendor = { id: string; name: string; pickup_location: string | null; contact: { contact_name: string; phone: string } | null };
 type AdminOrder = { id: string; order_number: string; status: string; payment_status: string; delivery_type: string | null; delivery_address: string | null; delivery_slot: string | null; total: number | null; amount_paid: number | null; created_at: string; item_summary: string; vendors: OrderVendor[] };
-type DashboardData = { metrics: { pending_transfers: number; pending_vendor_applications: number; paid_orders: number; pending_payouts: number; dispatch_queue: number }; pending_transfers: Transfer[]; pending_vendor_applications: Application[]; pending_payouts: Payout[]; dispatch_queue: DispatchOrder[]; delivery_riders: Rider[]; orders: AdminOrder[] };
+type DashboardData = { metrics: { pending_transfers: number; pending_vendor_applications: number; paid_orders: number; pending_payouts: number; dispatch_queue: number; gross_sales: number; sales_last_30_days: number; average_order_value: number; partner_vendors: number; top_vendors: { id: string; name: string; sales: number; orders: number }[] }; pending_transfers: Transfer[]; pending_vendor_applications: Application[]; pending_payouts: Payout[]; dispatch_queue: DispatchOrder[]; delivery_riders: Rider[]; orders: AdminOrder[] };
 type Page = 'overview' | 'orders' | 'transfers' | 'vendors' | 'payouts' | 'dispatch';
 
 const money = (kobo: number) => `₦${(Number(kobo) / 100).toLocaleString('en-NG')}`;
@@ -114,7 +114,61 @@ function Navigation({ page, setPage, id, icon, label, badge }: { page: Page; set
   const ordersActive = page === 'orders';
   return <>{item}<TouchableOpacity style={[styles.nav, ordersActive && styles.navActive]} onPress={() => setPage('orders')}><Ionicons name="receipt-outline" size={20} color={ordersActive ? '#176E73' : '#77828E'} /><Text style={[styles.navText, ordersActive && styles.navTextActive]}>All orders</Text></TouchableOpacity></>;
 }
-function Overview({ metrics, transfers, applications, payouts, setPage }: { metrics: DashboardData['metrics']; transfers: Transfer[]; applications: Application[]; payouts: Payout[]; setPage: (page: Page) => void }) { return <><View style={styles.heading}><View><Text style={styles.title}>AOM operations</Text><Text style={styles.subtitle}>Review payments, vendor settlements, and new store applications.</Text></View></View><View style={styles.metricRow}><Metric icon="time-outline" label="Transfers to confirm" value={metrics.pending_transfers} colour="#F4A62A" /><Metric icon="wallet-outline" label="Payouts to review" value={metrics.pending_payouts} colour="#176E73" /><Metric icon="storefront-outline" label="Vendor applications" value={metrics.pending_vendor_applications} colour="#365B95" /><Metric icon="checkmark-done-outline" label="Paid orders" value={metrics.paid_orders} colour="#25B68A" /></View><View style={styles.overviewGrid}><View style={styles.panel}><PanelHeader title="Awaiting transfer confirmation" action="View queue" onPress={() => setPage('transfers')} /><Text style={styles.panelCopy}>Only confirm after the exact amount appears in the AOM account.</Text>{transfers.slice(0, 3).map((transfer) => <View style={styles.previewRow} key={transfer.id}><View><Text style={styles.previewTitle}>{transfer.order?.order_number ?? 'Pending order'}</Text><Text style={styles.previewSub}>{transfer.delivery_address || 'Delivery address not provided'}</Text></View><Text style={styles.previewAmount}>{money(transfer.amount_kobo)}</Text></View>)}{!transfers.length ? <Empty text="No transfers await confirmation." /> : null}</View><View style={styles.panel}><PanelHeader title="Payout approvals" action="Review payouts" onPress={() => setPage('payouts')} /><Text style={styles.panelCopy}>Review completed-order settlements before sending vendor payments.</Text>{payouts.slice(0, 3).map((payout) => <View style={styles.previewRow} key={payout.id}><View><Text style={styles.previewTitle}>{payout.vendor?.name ?? 'Vendor'}</Text><Text style={styles.previewSub}>{payout.status === 'processing' ? 'Settlement processing' : 'Requested settlement'}</Text></View><Text style={styles.previewAmount}>₦{Number(payout.amount).toLocaleString('en-NG')}</Text></View>)}{!payouts.length ? <Empty text="No payouts need review." /> : null}</View><View style={styles.panel}><PanelHeader title="Vendor applications" action="Review applications" onPress={() => setPage('vendors')} /><Text style={styles.panelCopy}>Approving an application automatically links the vendor’s workspace.</Text>{applications.slice(0, 3).map((application) => <View style={styles.previewRow} key={application.id}><View><Text style={styles.previewTitle}>{application.store_name}</Text><Text style={styles.previewSub}>{application.store_type} · {application.contact_name}</Text></View><Text style={styles.previewDate}>{date(application.created_at).split(',')[0]}</Text></View>)}{!applications.length ? <Empty text="No vendor applications await review." /> : null}</View></View></>; }
+function Overview({ metrics, transfers, applications, payouts, setPage }: { metrics: DashboardData['metrics']; transfers: Transfer[]; applications: Application[]; payouts: Payout[]; setPage: (page: Page) => void }) {
+  const topVendors = metrics.top_vendors ?? [];
+  return <>
+    <View style={styles.heading}>
+      <View>
+        <Text style={styles.title}>AOM operations</Text>
+        <Text style={styles.subtitle}>Your live marketplace snapshot, followed by the actions that need attention.</Text>
+      </View>
+    </View>
+
+    <View style={styles.insightGrid}>
+      <InsightMetric icon="cash-outline" label="Paid sales" value={money(metrics.gross_sales * 100)} note="All successful customer payments" colour="#176E73" />
+      <InsightMetric icon="trending-up-outline" label="Sales in the last 30 days" value={money(metrics.sales_last_30_days * 100)} note="Rolling 30-day performance" colour="#25B68A" />
+      <InsightMetric icon="receipt-outline" label="Average order value" value={money(metrics.average_order_value * 100)} note={metrics.paid_orders + " paid order" + (metrics.paid_orders === 1 ? "" : "s") + " overall"} colour="#365B95" />
+      <InsightMetric icon="storefront-outline" label="Partner vendors" value={String(metrics.partner_vendors)} note="Stores on the AOM platform" colour="#F4A62A" />
+    </View>
+
+    <View style={styles.topVendorPanel}>
+      <PanelHeader title="Top vendors by sales" action="View all orders" onPress={() => setPage('orders')} />
+      <Text style={styles.panelCopy}>Ranked from the value of paid product orders. This helps the team spot strong stores and vendors who may need support.</Text>
+      {topVendors.length ? <View style={styles.vendorRankGrid}>{topVendors.map((vendor, index) => <View key={vendor.id} style={styles.vendorRank}><View style={styles.rankNumber}><Text style={styles.rankNumberText}>{index + 1}</Text></View><View style={styles.rankCopy}><Text style={styles.rankName} numberOfLines={1}>{vendor.name}</Text><Text style={styles.rankMeta}>{vendor.orders} paid order{vendor.orders === 1 ? '' : 's'}</Text></View><Text style={styles.rankSales}>₦{Number(vendor.sales).toLocaleString('en-NG')}</Text></View>)}</View> : <Empty text="Top-vendor sales will appear after paid product orders are recorded." />}
+    </View>
+
+    <View style={styles.metricRow}>
+      <Metric icon="time-outline" label="Transfers to confirm" value={metrics.pending_transfers} colour="#F4A62A" />
+      <Metric icon="wallet-outline" label="Payouts to review" value={metrics.pending_payouts} colour="#176E73" />
+      <Metric icon="storefront-outline" label="Vendor applications" value={metrics.pending_vendor_applications} colour="#365B95" />
+      <Metric icon="checkmark-done-outline" label="Paid orders" value={metrics.paid_orders} colour="#25B68A" />
+    </View>
+
+    <View style={styles.overviewGrid}>
+      <View style={styles.panel}>
+        <PanelHeader title="Awaiting transfer confirmation" action="View queue" onPress={() => setPage('transfers')} />
+        <Text style={styles.panelCopy}>Only confirm after the exact amount appears in the AOM account.</Text>
+        {transfers.slice(0, 3).map((transfer) => <View style={styles.previewRow} key={transfer.id}><View><Text style={styles.previewTitle}>{transfer.order?.order_number ?? 'Pending order'}</Text><Text style={styles.previewSub}>{transfer.delivery_address || 'Delivery address not provided'}</Text></View><Text style={styles.previewAmount}>{money(transfer.amount_kobo)}</Text></View>)}
+        {!transfers.length ? <Empty text="No transfers await confirmation." /> : null}
+      </View>
+      <View style={styles.panel}>
+        <PanelHeader title="Payout approvals" action="Review payouts" onPress={() => setPage('payouts')} />
+        <Text style={styles.panelCopy}>Review completed-order settlements before sending vendor payments.</Text>
+        {payouts.slice(0, 3).map((payout) => <View style={styles.previewRow} key={payout.id}><View><Text style={styles.previewTitle}>{payout.vendor?.name ?? 'Vendor'}</Text><Text style={styles.previewSub}>{payout.status === 'processing' ? 'Settlement processing' : 'Requested settlement'}</Text></View><Text style={styles.previewAmount}>₦{Number(payout.amount).toLocaleString('en-NG')}</Text></View>)}
+        {!payouts.length ? <Empty text="No payouts need review." /> : null}
+      </View>
+      <View style={styles.panel}>
+        <PanelHeader title="Vendor applications" action="Review applications" onPress={() => setPage('vendors')} />
+        <Text style={styles.panelCopy}>Approving an application automatically links the vendor’s workspace.</Text>
+        {applications.slice(0, 3).map((application) => <View style={styles.previewRow} key={application.id}><View><Text style={styles.previewTitle}>{application.store_name}</Text><Text style={styles.previewSub}>{application.store_type} - {application.contact_name}</Text></View><Text style={styles.previewDate}>{date(application.created_at).split(',')[0]}</Text></View>)}
+        {!applications.length ? <Empty text="No vendor applications await review." /> : null}
+      </View>
+    </View>
+  </>;
+}
+function InsightMetric({ icon, label, value, note, colour }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string; note: string; colour: string }) {
+  return <View style={styles.insightMetric}><View style={styles.insightTop}><View style={[styles.metricIcon, { backgroundColor: colour + '22' }]}><Ionicons name={icon} size={21} color={colour} /></View><Text style={styles.insightLabel}>{label}</Text></View><Text style={styles.insightValue}>{value}</Text><Text style={styles.insightNote}>{note}</Text></View>;
+}
 function Metric({ icon, label, value, colour }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: number; colour: string }) { return <View style={styles.metric}><View style={[styles.metricIcon, { backgroundColor: `${colour}22` }]}><Ionicons name={icon} size={22} color={colour} /></View><Text style={styles.metricValue}>{value}</Text><Text style={styles.metricLabel}>{label}</Text></View>; }
 function PanelHeader({ title, action, onPress }: { title: string; action: string; onPress: () => void }) { return <View style={styles.panelHead}><Text style={styles.panelTitle}>{title}</Text><TouchableOpacity onPress={onPress}><Text style={styles.panelAction}>{action}</Text></TouchableOpacity></View>; }
 function Empty({ text }: { text: string }) { return <View style={styles.empty}><Ionicons name="checkmark-circle-outline" size={28} color="#25B68A" /><Text style={styles.emptyText}>{text}</Text></View>; }
@@ -133,6 +187,21 @@ function Orders({ orders }: { orders: AdminOrder[] }) {
 }
 
 const styles = StyleSheet.create({
+  insightGrid: { flexDirection: 'row', gap: 16, marginBottom: 18 },
+  insightMetric: { flex: 1, minHeight: 164, borderRadius: 14, backgroundColor: '#01193D', padding: 19, justifyContent: 'space-between' },
+  insightTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  insightLabel: { color: '#E9F0F8', fontSize: 13, fontWeight: '800', flex: 1 },
+  insightValue: { color: '#FFFFFF', fontSize: 28, fontWeight: '800', marginTop: 14 },
+  insightNote: { color: '#B7C7DA', fontSize: 12, lineHeight: 17, marginTop: 8 },
+  topVendorPanel: { borderRadius: 14, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8EE', padding: 21, marginBottom: 24 },
+  vendorRankGrid: { flexDirection: 'row', gap: 12, marginTop: 6 },
+  vendorRank: { flex: 1, minWidth: 0, borderWidth: 1, borderColor: '#E6EDF1', borderRadius: 11, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: '#FBFCFD' },
+  rankNumber: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E1F5EE' },
+  rankNumberText: { color: '#176E73', fontSize: 13, fontWeight: '800' },
+  rankCopy: { flex: 1, minWidth: 0 },
+  rankName: { color: '#01193D', fontSize: 13, fontWeight: '800' },
+  rankMeta: { color: '#7B8794', fontSize: 11, marginTop: 3 },
+  rankSales: { color: '#176E73', fontSize: 13, fontWeight: '800' },
   orderList: { gap: 14 }, orderCard: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E0E6EC', borderRadius: 13, padding: 18 }, orderTop: { flexDirection: 'row', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start' }, orderStates: { flexDirection: 'row', gap: 7, alignItems: 'center' }, orderStatus: { color: '#176E73', backgroundColor: '#E1F5EE', borderRadius: 12, paddingHorizontal: 9, paddingVertical: 5, fontSize: 11, fontWeight: '800', textTransform: 'capitalize' }, paymentStatus: { color: '#365B95', backgroundColor: '#E7ECF3', borderRadius: 12, paddingHorizontal: 9, paddingVertical: 5, fontSize: 11, fontWeight: '800', textTransform: 'capitalize' }, orderItems: { color: '#445468', fontSize: 13, lineHeight: 19, marginTop: 14 }, vendorDetails: { marginTop: 14, gap: 8 }, vendorDetail: { borderTopWidth: 1, borderTopColor: '#EDF1F4', paddingTop: 11, flexDirection: 'row', alignItems: 'center', gap: 9 }, vendorDetailIcon: { width: 34, height: 34, borderRadius: 8, backgroundColor: '#E1F5EE', alignItems: 'center', justifyContent: 'center' }, vendorDetailName: { color: '#01193D', fontSize: 14, fontWeight: '800' }, vendorDetailText: { color: '#657283', fontSize: 12, marginTop: 3 }, orderFoot: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#EDF1F4', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, orderLocation: { color: '#657283', fontSize: 12, flex: 1 }, orderTotal: { color: '#176E73', fontSize: 16, fontWeight: '800' },
   dispatchCard: { borderWidth: 1, borderColor: '#E0E6EC', borderRadius: 13, backgroundColor: '#FFFFFF', padding: 18, marginBottom: 14 }, dispatchTop: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, marginBottom: 16 }, dispatchStatus: { color: '#176E73', backgroundColor: '#E1F5EE', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6, fontSize: 12, fontWeight: '800', textTransform: 'capitalize' }, dispatchAssign: { gap: 10 }, riderLabel: { color: '#657283', fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.3 }, riderChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, riderChoice: { minHeight: 38, paddingHorizontal: 11, borderRadius: 8, borderWidth: 1, borderColor: '#BFD8D0', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FFFFFF' }, riderChoiceActive: { backgroundColor: '#E1F5EE', borderColor: '#25B68A' }, riderChoiceText: { color: '#176E73', fontSize: 13, fontWeight: '800' }, riderDirectoryEmpty: { color: '#7B8794', fontSize: 13 }, dispatchForm: { flexDirection: 'row', alignItems: 'center', gap: 9 }, riderInput: { flex: 1, height: 42, borderWidth: 1, borderColor: '#D6DEE6', borderRadius: 8, paddingHorizontal: 11, color: '#01193D', fontSize: 13 }, riderName: { color: '#01193D', fontSize: 14, fontWeight: '800' }, contactButton: { width: 40, height: 40, borderWidth: 1, borderColor: '#BFD8D0', borderRadius: 8, alignItems: 'center', justifyContent: 'center' }, dispatchNote: { color: '#657283', fontSize: 13, lineHeight: 19 },
   payoutState: { alignSelf: 'center', color: '#8A6415', fontSize: 12, fontWeight: '800', textTransform: 'capitalize' },

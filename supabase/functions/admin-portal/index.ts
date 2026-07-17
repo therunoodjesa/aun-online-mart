@@ -18,7 +18,7 @@ async function requireAdmin(request: Request) {
 }
 
 async function dashboard(db: ReturnType<typeof admin>) {
-  const [{ count: pendingTransferCount }, { count: pendingVendorCount }, { count: paidOrderCount }, { count: pendingPayoutCount }, { count: dispatchCount }, { data: intents, error: intentError }, { data: applications, error: applicationError }, { data: payoutRows, error: payoutError }, { data: dispatchRows, error: dispatchError }, { data: riderRows, error: riderError }, { data: allOrders, error: allOrdersError }] = await Promise.all([
+  const [{ count: pendingTransferCount }, { count: pendingVendorCount }, { count: paidOrderCount }, { count: pendingPayoutCount }, { count: dispatchCount }, { data: intents, error: intentError }, { data: applications, error: applicationError }, { data: payoutRows, error: payoutError }, { data: dispatchRows, error: dispatchError }, { data: riderRows, error: riderError }, { data: allOrders, error: allOrdersError }, { data: salesOrders, error: salesOrdersError }, { count: vendorCount, error: vendorCountError }] = await Promise.all([
     db.from('payment_intents').select('*', { count: 'exact', head: true }).eq('payment_channel', 'bank_transfer').eq('status', 'pending'),
     db.from('vendor_applications').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
     db.from('orders').select('*', { count: 'exact', head: true }).eq('payment_status', 'paid'),
@@ -30,6 +30,8 @@ async function dashboard(db: ReturnType<typeof admin>) {
     db.from('orders').select('id, order_number, status, delivery_type, delivery_address, delivery_slot, rider_name, rider_phone, rider_assigned_at, dispatch_status, created_at').eq('payment_status', 'paid').in('status', ['ready', 'out_for_delivery']).order('created_at', { ascending: true }).limit(50),
     db.from('delivery_riders').select('id, full_name, phone, accepts_calls, accepts_whatsapp, coverage_area, availability').eq('availability', 'active').order('full_name'),
     db.from('orders').select('id, order_number, status, payment_status, delivery_type, delivery_address, delivery_slot, total, amount_paid, created_at').order('created_at', { ascending: false }).limit(100),
+    db.from('orders').select('id, total, created_at').eq('payment_status', 'paid').order('created_at', { ascending: false }).limit(1000),
+    db.from('vendors').select('id', { count: 'exact', head: true }),
   ]);
   if (intentError) throw new Error(intentError.message);
   if (applicationError) throw new Error(applicationError.message);
@@ -37,6 +39,8 @@ async function dashboard(db: ReturnType<typeof admin>) {
   if (dispatchError) throw new Error(dispatchError.message);
   if (riderError) throw new Error(riderError.message);
   if (allOrdersError) throw new Error(allOrdersError.message);
+  if (salesOrdersError) throw new Error(salesOrdersError.message);
+  if (vendorCountError) throw new Error(vendorCountError.message);
 
   const orderIds = (intents ?? []).map((intent) => intent.order_id).filter(Boolean);
   const { data: orders, error: ordersError } = orderIds.length
@@ -86,8 +90,43 @@ async function dashboard(db: ReturnType<typeof admin>) {
     };
   });
 
+  const salesOrderIds = (salesOrders ?? []).map((order) => order.id);
+  const { data: salesItems, error: salesItemsError } = salesOrderIds.length
+    ? await db.from('order_items').select('order_id, product_id, quantity, unit_price, total_price').in('order_id', salesOrderIds)
+    : { data: [], error: null };
+  if (salesItemsError) throw new Error(salesItemsError.message);
+  const salesProductIds = [...new Set((salesItems ?? []).map((item) => item.product_id).filter(Boolean))];
+  const { data: salesProducts, error: salesProductsError } = salesProductIds.length
+    ? await db.from('products').select('id, vendor_id').in('id', salesProductIds)
+    : { data: [], error: null };
+  if (salesProductsError) throw new Error(salesProductsError.message);
+  const salesProductVendorById = new Map((salesProducts ?? []).map((product) => [product.id, product.vendor_id]));
+  const salesVendorIds = [...new Set((salesProducts ?? []).map((product) => product.vendor_id).filter(Boolean))];
+  const { data: salesVendors, error: salesVendorsError } = salesVendorIds.length
+    ? await db.from('vendors').select('id, name').in('id', salesVendorIds)
+    : { data: [], error: null };
+  if (salesVendorsError) throw new Error(salesVendorsError.message);
+  const salesVendorNameById = new Map((salesVendors ?? []).map((vendor) => [vendor.id, vendor.name]));
+  const vendorSales = new Map<string, { sales: number; orderIds: Set<string> }>();
+  for (const item of salesItems ?? []) {
+    const vendorId = salesProductVendorById.get(item.product_id);
+    if (!vendorId) continue;
+    const value = Number(item.total_price ?? Number(item.unit_price ?? 0) * Number(item.quantity ?? 1));
+    const current = vendorSales.get(vendorId) ?? { sales: 0, orderIds: new Set<string>() };
+    current.sales += value;
+    current.orderIds.add(item.order_id);
+    vendorSales.set(vendorId, current);
+  }
+  const grossSales = (salesOrders ?? []).reduce((sum, order) => sum + Number(order.total ?? 0), 0);
+  const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+  const salesLast30Days = (salesOrders ?? []).filter((order) => new Date(order.created_at).getTime() >= thirtyDaysAgo).reduce((sum, order) => sum + Number(order.total ?? 0), 0);
+  const topVendors = [...vendorSales.entries()]
+    .map(([vendorId, value]) => ({ id: vendorId, name: salesVendorNameById.get(vendorId) ?? 'Vendor', sales: value.sales, orders: value.orderIds.size }))
+    .sort((a, b) => b.sales - a.sales)
+    .slice(0, 5);
+
   return {
-    metrics: { pending_transfers: pendingTransferCount ?? 0, pending_vendor_applications: pendingVendorCount ?? 0, paid_orders: paidOrderCount ?? 0, pending_payouts: pendingPayoutCount ?? 0, dispatch_queue: dispatchCount ?? 0 },
+    metrics: { pending_transfers: pendingTransferCount ?? 0, pending_vendor_applications: pendingVendorCount ?? 0, paid_orders: paidOrderCount ?? 0, pending_payouts: pendingPayoutCount ?? 0, dispatch_queue: dispatchCount ?? 0, gross_sales: grossSales, sales_last_30_days: salesLast30Days, average_order_value: (salesOrders ?? []).length ? Math.round(grossSales / (salesOrders ?? []).length) : 0, partner_vendors: vendorCount ?? 0, top_vendors: topVendors },
     pending_transfers: (intents ?? []).map((intent) => ({ ...intent, order: intent.order_id ? orderById.get(intent.order_id) ?? null : null })),
     pending_vendor_applications: applications ?? [],
     pending_payouts: (payoutRows ?? []).map((payout) => ({ ...payout, vendor: vendorById.get(payout.vendor_id) ?? null })),
