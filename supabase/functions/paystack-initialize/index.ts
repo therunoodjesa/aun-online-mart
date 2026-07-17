@@ -7,7 +7,7 @@ Deno.serve(async (request) => {
     if (!user) return json({ error: 'Please sign in before paying.' }, 401);
     const body = await request.json();
     const fulfilment = body.fulfilment === 'pickup' ? 'pickup' : 'delivery';
-    const priced = await priceCart(body.items ?? []);
+    const priced = await priceCart(body.items ?? [], fulfilment);
     const reference = `aom_${crypto.randomUUID().replaceAll('-', '')}`;
     const db = admin();
     const { data: intent, error } = await db.from('payment_intents').insert({ user_id: user.id, reference, amount_kobo: Math.round(priced.total * 100), fulfilment, delivery_address: body.address ?? null, delivery_slot: body.slot ?? null, cart: { ...priced, fulfilment } }).select('id').single();

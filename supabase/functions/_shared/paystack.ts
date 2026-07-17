@@ -29,7 +29,7 @@ export async function paystack(path: string, init?: RequestInit) {
 
 export type CheckoutLine = { product_id: string; product_name: string; unit_price: number; quantity: number; selected_options: unknown[]; note: string | null };
 
-export async function priceCart(rawItems: { productId: string; quantity: number }[]) {
+export async function priceCart(rawItems: { productId: string; quantity: number }[], fulfilment: 'delivery' | 'pickup' = 'delivery') {
   const normalised = rawItems.map((item) => ({ ...item, productId: String(item.productId) })).filter((item) => item.quantity > 0 && item.quantity <= 25);
   if (!normalised.length) throw new Error('Your cart is empty.');
   if (normalised.some((item) => item.productId.startsWith('cafeteria:'))) throw new Error('Cafeteria checkout is being connected separately. Please remove cafeteria items to pay for this order.');
@@ -52,6 +52,6 @@ export async function priceCart(rawItems: { productId: string; quantity: number 
   });
   const subtotal = lines.reduce((total, line) => total + line.unit_price * line.quantity, 0);
   const serviceFee = Math.round(subtotal * 0.1);
-  const deliveryFee = 2500;
+  const deliveryFee = fulfilment === 'pickup' ? 0 : 2500;
   return { lines, subtotal, serviceFee, deliveryFee, total: subtotal + serviceFee + deliveryFee };
 }

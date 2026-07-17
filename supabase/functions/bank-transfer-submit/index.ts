@@ -9,7 +9,7 @@ Deno.serve(async (request) => {
     if (body.confirmed !== true) return json({ error: 'Confirm that you completed the bank transfer.' }, 400);
 
     const fulfilment = body.fulfilment === 'pickup' ? 'pickup' : 'delivery';
-    const priced = await priceCart(body.items ?? []);
+    const priced = await priceCart(body.items ?? [], fulfilment);
     const reference = `aom_transfer_${crypto.randomUUID().replaceAll('-', '')}`;
     const orderNumber = `AOM-${String(Date.now()).slice(-7)}`;
     const db = admin();
