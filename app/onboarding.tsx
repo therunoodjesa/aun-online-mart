@@ -356,7 +356,7 @@ const styles = StyleSheet.create({
   permissionDetail: { color: COLORS.muted, fontSize: 15 }, permissionDivider: { height: 1, backgroundColor: 'rgba(160,160,160,0.5)' },
   repeatBottom: { position: 'absolute', top: 600, left: 28, width: 370 },
   navigation: { minHeight: 90, paddingTop: 10, paddingBottom: 21, paddingLeft: 21, paddingRight: 35, flexDirection: 'row', gap: 4 },
-  navigationFirst: { left: 34 },
+  navigationFirst: { paddingLeft: 34, paddingRight: 34 },
   backButton: { width: 96, height: 55, borderRadius: 8, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center' },
   nextButton: { flex: 1, height: 55, borderRadius: 8, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center' },
   nextButtonFull: { width: '100%' },
