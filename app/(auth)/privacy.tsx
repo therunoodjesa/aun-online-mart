@@ -1,14 +1,15 @@
 import { useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  ScrollView, Dimensions
+  ScrollView, Dimensions, Platform
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 
 const { width } = Dimensions.get('window');
-const S = width / 430;
+const S = Platform.OS === 'web' ? 1 : width / 430;
+const isDesktop = Platform.OS === 'web' && width >= 760;
 
 const SECTIONS = [
   {
@@ -67,7 +68,7 @@ export default function PrivacyPolicy() {
       <StatusBar style="light" />
 
       {/* Top bar */}
-      <View style={styles.topBar}>
+      <View style={[styles.topBar, isDesktop && styles.topBarDesktop]}>
         <TouchableOpacity
           style={styles.backBtn}
           onPress={() => router.back()}
@@ -84,20 +85,21 @@ export default function PrivacyPolicy() {
       <ScrollView
         ref={scrollRef}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={[styles.scroll, isDesktop && styles.scrollDesktop]}
       >
-        {/* Header */}
-        <View style={styles.docHeader}>
+        <View style={[styles.document, isDesktop && styles.documentDesktop]}>
+        <View style={[styles.introGrid, isDesktop && styles.introGridDesktop]}>
+        <View style={[styles.docHeader, isDesktop && styles.docHeaderDesktop]}>
           <View style={styles.docBadge}>
             <Ionicons name="shield-checkmark-outline" size={14 * S} color="#68ECCB" />
             <Text style={styles.docBadgeText}>Your privacy</Text>
           </View>
-          <Text style={styles.docTitle}>Privacy policy</Text>
+          <Text style={[styles.docTitle, isDesktop && styles.docTitleDesktop]}>Privacy policy</Text>
           <Text style={styles.docMeta}>Effective 1 September 2025 · Version 2.0</Text>
         </View>
 
         {/* Table of contents */}
-        <View style={styles.tocWrap}>
+        <View style={[styles.tocWrap, isDesktop && styles.tocWrapDesktop]}>
           <Text style={styles.tocLabel}>Contents</Text>
           {TOC.map((item, i) => (
             <TouchableOpacity
@@ -112,6 +114,7 @@ export default function PrivacyPolicy() {
               <Ionicons name="chevron-forward-outline" size={14 * S} color="#68ECCB" />
             </TouchableOpacity>
           ))}
+        </View>
         </View>
 
         <View style={styles.divider} />
@@ -128,7 +131,7 @@ export default function PrivacyPolicy() {
               </View>
               <Text style={styles.sectionTitle}>{section.title}</Text>
             </View>
-            <Text style={styles.sectionBody}>{section.body}</Text>
+            <Text style={[styles.sectionBody, isDesktop && styles.sectionBodyDesktop]}>{section.body}</Text>
             {i < SECTIONS.length - 1 && <View style={styles.divider} />}
           </View>
         ))}
@@ -155,6 +158,7 @@ export default function PrivacyPolicy() {
           </TouchableOpacity>
         </View>
 
+        </View>
       </ScrollView>
     </View>
   );
@@ -173,6 +177,7 @@ const styles = StyleSheet.create({
     paddingTop: 52 * S,
     paddingBottom: 16 * S,
   },
+  topBarDesktop: { width: '100%', maxWidth: 1080, alignSelf: 'center', paddingHorizontal: 32, paddingTop: 30, paddingBottom: 24 },
   backBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -198,9 +203,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 30 * S,
     paddingBottom: 48 * S,
   },
+  scrollDesktop: { paddingHorizontal: 32, alignItems: 'center', paddingBottom: 64 },
+  document: { width: '100%', maxWidth: 540 },
+  documentDesktop: { maxWidth: 980 },
+  introGrid: { width: '100%' },
+  introGridDesktop: { flexDirection: 'row', gap: 52, alignItems: 'flex-start', marginBottom: 30 },
 
   // HEADER
   docHeader: { marginBottom: 24 * S },
+  docHeaderDesktop: { flex: 1, marginBottom: 0, paddingTop: 12 },
   docBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -225,6 +236,7 @@ const styles = StyleSheet.create({
     color: '#F8F3ED',
     marginBottom: 4 * S,
   },
+  docTitleDesktop: { fontSize: 42, lineHeight: 49, letterSpacing: -1 },
   docMeta: {
     fontSize: 13 * S,
     color: '#A0A0A0',
@@ -239,6 +251,7 @@ const styles = StyleSheet.create({
     padding: 16 * S,
     marginBottom: 24 * S,
   },
+  tocWrapDesktop: { width: 360, marginBottom: 0, padding: 20 },
   tocLabel: {
     fontSize: 12 * S,
     fontWeight: '600',
@@ -305,6 +318,7 @@ const styles = StyleSheet.create({
     marginBottom: 20 * S,
     paddingLeft: 34 * S,
   },
+  sectionBodyDesktop: { maxWidth: 800, fontSize: 16, lineHeight: 25 },
   divider: {
     height: 0.5,
     backgroundColor: 'rgba(255,255,255,0.1)',
