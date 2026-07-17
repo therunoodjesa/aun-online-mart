@@ -11,7 +11,7 @@ import { CartToast } from '../../../components/CartToast';
 
 const CAFETERIA_FALLBACK = require('../../../assets/images/home/jollof-promo.png');
 type Product = { id: string; name: string; description: string | null; category: string; price: number; image_url: string | null; status: 'available' | 'sold_out' | 'hidden'; meal_plan_eligible: boolean };
-type ProductOption = { id: string; option_group: string; name: string; price_modifier: number; is_available: boolean };
+type ProductOption = { id: string; option_group: string; name: string; price_modifier: number; is_available: boolean; selection_mode: 'single' };
 const price = (amount: number) => `₦${amount.toLocaleString('en-NG')}`;
 
 export default function CafeteriaProductPage() {
@@ -21,8 +21,7 @@ export default function CafeteriaProductPage() {
   const [product, setProduct] = useState<Product | null>(null);
   const [options, setOptions] = useState<ProductOption[]>([]);
   const [related, setRelated] = useState<Product[]>([]);
-  const [proteinId, setProteinId] = useState<string | null>(null);
-  const [sideId, setSideId] = useState<string | null>(null);
+  const [selections, setSelections] = useState<Record<string, string>>({});
   const [quantity, setQuantity] = useState(1);
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(true);
@@ -38,7 +37,7 @@ export default function CafeteriaProductPage() {
       const { data } = await supabase.from('cafeteria_products').select('id, name, description, category, price, image_url, status, meal_plan_eligible').eq('id', productId).single();
       if (!active) return;
       setProduct((data as Product | null) ?? null);
-      const { data: optionData } = await supabase.from('product_options').select('id, option_group, name, price_modifier, is_available').eq('product_id', productId).eq('is_available', true);
+      const { data: optionData } = await supabase.from('cafeteria_product_options').select('id, option_group, name, price_modifier, is_available, selection_mode').eq('product_id', productId).eq('is_available', true);
       const { data: relatedRows } = data ? await supabase.from('cafeteria_products').select('id, name, description, category, price, image_url, status, meal_plan_eligible').eq('category', (data as Product).category).eq('status', 'available').neq('id', productId).limit(4) : { data: [] };
       if (active) { setOptions((optionData ?? []) as ProductOption[]); setRelated((relatedRows ?? []) as Product[]); setFavourite(await isFavourited('cafeteria_product', productId).catch(() => false)); setLoading(false); }
     };
@@ -46,17 +45,15 @@ export default function CafeteriaProductPage() {
     return () => { active = false; };
   }, [productId]);
 
-  const proteins = useMemo(() => options.filter((option) => /protein/i.test(option.option_group)), [options]);
-  const sides = useMemo(() => options.filter((option) => /side/i.test(option.option_group)), [options]);
-  const protein = proteins.find((option) => option.id === proteinId);
-  const side = sides.find((option) => option.id === sideId);
-  const unitPrice = (product?.price ?? 0) + (protein?.price_modifier ?? 0) + (side?.price_modifier ?? 0);
+  const optionGroups = useMemo(() => Array.from(options.reduce((groups, option) => { const group = option.option_group.trim() || 'Options'; groups.set(group, [...(groups.get(group) ?? []), option]); return groups; }, new Map<string, ProductOption[]>()).entries()), [options]);
+  const selectedOptions = useMemo(() => options.filter((option) => selections[option.option_group.trim() || 'Options'] === option.id), [options, selections]);
+  const unitPrice = (product?.price ?? 0) + selectedOptions.reduce((total, option) => total + option.price_modifier, 0);
   const total = unitPrice * quantity;
   const goBack = () => router.canGoBack() ? router.back() : router.replace('/(buyer)/cafeteria');
   const addToCart = () => {
     if (!product) return;
-    const choices = [protein?.name, side?.name].filter(Boolean).join(' · ') || 'No extras';
-    const key = `${product.id}:${proteinId ?? 'none'}:${sideId ?? 'none'}:${note.trim() || 'no-note'}`;
+    const choices = selectedOptions.map((option) => option.name).join(' · ') || 'No extras';
+    const key = `${product.id}:${selectedOptions.map((option) => option.id).join(':') || 'none'}:${note.trim() || 'no-note'}`;
     for (let index = 0; index < quantity; index += 1) addItem({ productId: `cafeteria:${key}`, name: `${product.name} · ${choices}`, category: `Cafeteria · ${product.category}`, price: unitPrice, imageUrl: product.image_url, mealPlanEligible: product.meal_plan_eligible });
     setCartToast(`${product.name} added to cart`);
   };
@@ -70,9 +67,7 @@ export default function CafeteriaProductPage() {
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={styles.hero}><Image source={product.image_url && !heroImageFailed ? { uri: product.image_url } : CAFETERIA_FALLBACK} onError={() => setHeroImageFailed(true)} style={styles.heroImage} /><View style={styles.heroShade} /><TouchableOpacity onPress={goBack} style={styles.back} accessibilityLabel="Go back"><Ionicons name="arrow-back-outline" size={24} color="#F8F3ED" /></TouchableOpacity><FavouriteButton entityType="cafeteria_product" entityId={product.id} style={styles.heart} /></View>
       <View style={styles.details}><Text style={styles.title}>{product.name}</Text><View style={styles.rating}><Ionicons name="star" size={18} color="#D7B300" /><Text style={styles.ratingNumber}>4.9</Text><Text style={styles.orders}>(0 orders)</Text></View>{product.description?.trim() ? <Text style={styles.description}>{product.description}</Text> : null}
-        {proteins.length > 0 && <><Text style={styles.sectionLabel}>CHOOSE PROTEIN</Text><View style={styles.optionList}>{proteins.map((choice) => { const selected = choice.id === proteinId; return <TouchableOpacity key={choice.id} style={[styles.optionRow, selected && styles.optionActive]} onPress={() => setProteinId(selected ? null : choice.id)}><Text style={styles.optionName}>{choice.name}</Text><View style={styles.optionRight}><Text style={styles.optionPrice}>{choice.price_modifier ? `+${price(choice.price_modifier)}` : 'Included'}</Text><View style={[styles.radio, selected && styles.radioActive]}>{selected && <Ionicons name="checkmark" size={13} color="#F8F3ED" />}</View></View></TouchableOpacity>; })}</View></>}
-        {sides.length > 0 && <><Text style={styles.sectionLabel}>CHOOSE SIDE</Text><View style={styles.sides}>{sides.map((choice) => { const selected = choice.id === sideId; return <TouchableOpacity key={choice.id} style={[styles.side, selected && styles.sideActive]} onPress={() => setSideId(selected ? null : choice.id)}><Text style={[styles.sideText, selected && styles.sideTextActive]}>{choice.name}{choice.price_modifier ? ` +${price(choice.price_modifier)}` : ''}</Text></TouchableOpacity>; })}</View></>}
-        {!proteins.length && !sides.length && <View style={styles.readyCard}><Ionicons name="restaurant-outline" size={22} color="#00695A" /><Text style={styles.readyText}>This item is ready to order. Adjust the quantity below and add it to your cart.</Text></View>}
+        {optionGroups.length > 0 ? optionGroups.map(([group, groupChoices]) => <View key={group}><Text style={styles.sectionLabel}>CHOOSE ONE {group.toUpperCase()}</Text><View style={styles.optionList}>{groupChoices.map((choice) => { const selected = selections[group] === choice.id; return <TouchableOpacity key={choice.id} style={[styles.optionRow, selected && styles.optionActive]} onPress={() => setSelections((current) => ({ ...current, [group]: selected ? '' : choice.id }))}><Text style={styles.optionName}>{choice.name}</Text><View style={styles.optionRight}><Text style={styles.optionPrice}>{choice.price_modifier ? `+${price(choice.price_modifier)}` : 'Included'}</Text><View style={[styles.radio, selected && styles.radioActive]}>{selected && <Ionicons name="checkmark" size={13} color="#F8F3ED" />}</View></View></TouchableOpacity>; })}</View></View>) : <View style={styles.readyCard}><Ionicons name="restaurant-outline" size={22} color="#00695A" /><Text style={styles.readyText}>This item is ready to order. Adjust the quantity below and add it to your cart.</Text></View>}
         <Text style={styles.sectionLabel}>SPECIAL INSTRUCTIONS</Text><View style={styles.noteBox}><Ionicons name="pencil" size={19} color="#7E7E7E" /><TextInput value={note} onChangeText={setNote} placeholder="Write any special request for the cafeteria" placeholderTextColor="#7E7E7E" style={[styles.noteInput, { height: 54, paddingVertical: 0, textAlignVertical: 'center', includeFontPadding: false }]} /></View>
         {related.length > 0 && <View style={styles.relatedSection}><Text style={styles.relatedTitle}>Customers also liked</Text><View style={styles.relatedGrid}>{related.map((item) => <View key={item.id} style={styles.relatedCard}><TouchableOpacity onPress={() => openRelated(item)}><Image source={item.image_url ? { uri: item.image_url } : CAFETERIA_FALLBACK} style={styles.relatedImage} /><Text numberOfLines={1} style={styles.relatedName}>{item.name}</Text></TouchableOpacity><View style={styles.relatedFooter}><Text style={styles.relatedPrice}>{price(item.price)}</Text><TouchableOpacity onPress={() => addRelated(item)} style={styles.relatedCart} accessibilityLabel={`Add ${item.name} to cart`}><Ionicons name="cart" size={17} color="#F8F3ED" /></TouchableOpacity></View></View>)}</View></View>}
       </View>
