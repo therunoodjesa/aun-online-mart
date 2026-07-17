@@ -31,7 +31,7 @@ async function finalisePaidIntent(db: ReturnType<typeof admin>, intent: { id: st
     const { data: order, error } = await db.from('orders').insert({
       order_number: `AOM-${String(Date.now()).slice(-7)}`,
       user_id: intent.user_id, status: 'pending', delivery_type: intent.fulfilment,
-      payment_status: 'paid', payment_reference: intent.reference, amount_paid: total,
+      payment_status: 'pending', payment_reference: intent.reference, amount_paid: total,
       subtotal, total, delivery_address: intent.delivery_address, delivery_slot: intent.delivery_slot,
     }).select('id').single();
     if (error || !order) {
@@ -41,6 +41,8 @@ async function finalisePaidIntent(db: ReturnType<typeof admin>, intent: { id: st
     } else orderId = order.id;
   }
   await ensureOrderItems(db, orderId, lines);
+  const { error: paidOrderError } = await db.from('orders').update({ payment_status: 'paid' }).eq('id', orderId).eq('payment_status', 'pending');
+  if (paidOrderError) throw new Error(paidOrderError.message);
   const { count } = await db.from('order_updates').select('id', { count: 'exact', head: true }).eq('order_id', orderId);
   if (!(count ?? 0)) await db.from('order_updates').insert({ order_id: orderId, message: 'Order received and processing', update_type: 'system' });
   const { error: intentError } = await db.from('payment_intents').update({ status: 'paid', order_id: orderId, paystack_transaction_id: transactionId, paid_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', intent.id);

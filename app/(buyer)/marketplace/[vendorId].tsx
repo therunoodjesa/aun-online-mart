@@ -117,12 +117,12 @@ export default function VendorPage() {
     : [];
 
   const updateQty = (id: string, delta: number) => {
+    const product = vendor?.products.find((item) => item.id === id);
+    if (product?.status !== 'available') return;
     setQuantities(prev => ({
       ...prev,
       [id]: Math.max(0, (prev[id] ?? 0) + delta),
     }));
-
-    const product = vendor?.products.find((item) => item.id === id);
     if (delta > 0 && product) {
       addItem({ productId: product.id, name: product.name, category: product.category, price: product.price, imageUrl: product.image_url });
       setCartToast(`${product.name} added to cart`);
@@ -133,7 +133,7 @@ export default function VendorPage() {
 
   const addToCart = (id: string) => {
     const product = vendor?.products.find((item) => item.id === id);
-    if (!product) return;
+    if (!product || product.status !== 'available') return;
     addItem({ productId: product.id, name: product.name, category: product.category, price: product.price, imageUrl: product.image_url });
     setCartToast(`${product.name} added to cart`);
   };

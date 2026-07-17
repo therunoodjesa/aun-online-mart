@@ -35,8 +35,15 @@ export async function priceCart(rawItems: { productId: string; quantity: number 
   if (normalised.some((item) => item.productId.startsWith('cafeteria:'))) throw new Error('Cafeteria checkout is being connected separately. Please remove cafeteria items to pay for this order.');
   const ids = [...new Set(normalised.map((item) => item.productId.slice(0, 36)))];
   const db = admin();
-  const { data: products } = await db.from('products').select('id, name, price, status').in('id', ids).eq('status', 'available');
+  const { data: products } = await db.from('products').select('id, name, price, status, stock_quantity').in('id', ids).eq('status', 'available');
   if (!products || products.length !== ids.length) throw new Error('One or more items are no longer available. Please refresh your cart.');
+  const requestedByProduct = new Map<string, number>();
+  for (const item of normalised) {
+    const productId = item.productId.slice(0, 36);
+    requestedByProduct.set(productId, (requestedByProduct.get(productId) ?? 0) + Math.floor(item.quantity));
+  }
+  const shortProduct = products.find((product) => product.stock_quantity !== null && Number(product.stock_quantity) < (requestedByProduct.get(product.id) ?? 0));
+  if (shortProduct) throw new Error(`${shortProduct.name} does not have enough stock for this order. Please adjust your cart.`);
   const { data: options } = await db.from('product_options').select('id, name, price_modifier, is_available').in('product_id', ids).eq('is_available', true);
   const byId = new Map(products.map((product) => [product.id, product]));
   const optionsById = new Map((options ?? []).map((option) => [option.id, option]));

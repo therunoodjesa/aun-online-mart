@@ -25,10 +25,12 @@ Deno.serve(async (request) => {
     }
     const cart = intent.cart as { lines: { product_id: string; product_name: string; unit_price: number; quantity: number; selected_options: unknown[]; note: string | null }[]; subtotal: number; total: number };
     const orderNumber = `AOM-${String(Date.now()).slice(-7)}`;
-    const { data: order, error: orderError } = await db.from('orders').insert({ order_number: orderNumber, user_id: user.id, status: 'pending', delivery_type: intent.fulfilment, payment_status: 'paid', payment_reference: reference, amount_paid: cart.total, subtotal: cart.subtotal, total: cart.total, delivery_address: intent.delivery_address, delivery_slot: intent.delivery_slot }).select('id').single();
+    const { data: order, error: orderError } = await db.from('orders').insert({ order_number: orderNumber, user_id: user.id, status: 'pending', delivery_type: intent.fulfilment, payment_status: 'pending', payment_reference: reference, amount_paid: cart.total, subtotal: cart.subtotal, total: cart.total, delivery_address: intent.delivery_address, delivery_slot: intent.delivery_slot }).select('id').single();
     if (orderError || !order) throw new Error(orderError?.message ?? 'Could not create your order.');
     const { error: itemError } = await db.from('order_items').insert(cart.lines.map((line) => ({ order_id: order.id, product_id: line.product_id, product_name: line.product_name, unit_price: line.unit_price, quantity: line.quantity, total_price: line.unit_price * line.quantity, options: line.selected_options, notes: line.note })));
     if (itemError) throw new Error(itemError.message);
+    const { error: paidOrderError } = await db.from('orders').update({ payment_status: 'paid' }).eq('id', order.id).eq('payment_status', 'pending');
+    if (paidOrderError) throw new Error(paidOrderError.message);
     await db.from('order_updates').insert({ order_id: order.id, message: 'Order received and processing', update_type: 'system' });
     await db.from('payment_intents').update({ status: 'paid', order_id: order.id, paystack_transaction_id: Number(transaction.id), paid_at: new Date().toISOString() }).eq('id', intent.id);
     // Alerts are intentionally best-effort: a mail-provider outage must never block a paid order.

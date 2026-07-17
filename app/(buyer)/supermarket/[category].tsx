@@ -23,6 +23,7 @@ type Product = {
   image_url: string | null;
   category: string | null;
   marketplace_category: string | null;
+  status: 'available' | 'sold_out';
 };
 type SearchResult = { id: string; type: 'vendor' | 'marketplace-product' | 'supermarket-product' | 'cafeteria-product'; title: string; subtitle: string; vendorId?: string; category?: string | null };
 
@@ -62,8 +63,8 @@ export default function SupermarketCategoryPage() {
       setLoading(true);
       let request = supabase
         .from('products')
-        .select('id, vendor_id, name, price, image_url, category, marketplace_category')
-        .eq('status', 'available')
+        .select('id, vendor_id, name, price, image_url, category, marketplace_category, status')
+        .in('status', ['available', 'sold_out'])
         .is('marketplace_category', null)
         .order('created_at', { ascending: false });
       if (config.databaseCategory) request = request.eq('category', config.databaseCategory);
@@ -75,7 +76,7 @@ export default function SupermarketCategoryPage() {
       ]);
       const placementIds = (placementRows ?? []).map((placement) => placement.product_id);
       const { data: placedProducts } = placementIds.length
-        ? await supabase.from('products').select('id, vendor_id, name, price, image_url, category, marketplace_category').in('id', placementIds).eq('status', 'available')
+        ? await supabase.from('products').select('id, vendor_id, name, price, image_url, category, marketplace_category, status').in('id', placementIds).in('status', ['available', 'sold_out'])
         : { data: [] as Product[] };
       if (mounted) {
         setProducts(Array.from(new Map([...(data ?? []) as Product[], ...(placedProducts ?? []) as Product[]].map((product) => [product.id, product])).values()));
@@ -129,6 +130,7 @@ export default function SupermarketCategoryPage() {
 
   const quantity = (productId: string) => items.find((item) => item.productId === productId)?.quantity ?? 0;
   const updateQuantity = (product: Product, amount: number) => {
+    if (product.status !== 'available') return;
     if (amount > 0) { addItem({ productId: product.id, name: product.name, category: product.category, price: product.price, imageUrl: product.image_url }); setCartToast(`${product.name} added to cart`); }
     else changeQuantity(product.id, -1);
   };
@@ -167,15 +169,7 @@ export default function SupermarketCategoryPage() {
           </View>
           <Text style={styles.welcome}>Welcome to the AUN Online Mart supermarket! In this section, there are hundreds of products across baking ingredients, skincare, fragrances, groceries, etc. This feature saves you the trip to physical markets and shops, allowing you more leisure time. A service fee would be applied at checkout, according to your order weight and total time required for procurement and delivery.</Text>
         </>}
-        renderItem={({ item }) => <TouchableOpacity activeOpacity={0.9} onPress={() => router.push({ pathname: '/(buyer)/supermarket/[category]/[productId]', params: { category: key, productId: item.id } })} style={[styles.card, { width: cardWidth }]}>
-          <View style={styles.photoWrap}>
-            {item.image_url ? <Image source={{ uri: item.image_url }} style={styles.photo} /> : <View style={styles.photoPlaceholder}><Ionicons name="image-outline" size={30} color={COLORS.muted} /></View>}
-          </View>
-          <View style={styles.cardInfo}>
-            <View style={styles.nameRow}><Text numberOfLines={2} style={styles.productName}>{item.name}</Text><TouchableOpacity onPress={() => updateQuantity(item, 1)} hitSlop={8} accessibilityLabel={`Add ${item.name} to cart`}><Ionicons name="cart-outline" size={21} color={COLORS.cream} /></TouchableOpacity></View>
-            <View style={styles.purchaseRow}><View style={styles.stepper}><TouchableOpacity onPress={() => updateQuantity(item, -1)} style={styles.stepButton}><Text style={styles.stepText}>−</Text></TouchableOpacity><Text style={styles.quantity}>{quantity(item.id)}</Text><TouchableOpacity onPress={() => updateQuantity(item, 1)} style={styles.stepButton}><Text style={styles.stepText}>+</Text></TouchableOpacity></View><Text style={styles.price}>{money(item.price)}</Text></View>
-          </View>
-        </TouchableOpacity>}
+        renderItem={({ item }) => <TouchableOpacity activeOpacity={0.9} onPress={() => router.push({ pathname: '/(buyer)/supermarket/[category]/[productId]', params: { category: key, productId: item.id } })} style={[styles.card, { width: cardWidth }]}><View style={styles.photoWrap}>{item.image_url ? <Image source={{ uri: item.image_url }} style={styles.photo} /> : <View style={styles.photoPlaceholder}><Ionicons name="image-outline" size={30} color={COLORS.muted} /></View>}</View><View style={styles.cardInfo}><View style={styles.nameRow}><Text numberOfLines={2} style={styles.productName}>{item.name}</Text>{item.status === 'available' ? <TouchableOpacity onPress={() => updateQuantity(item, 1)} hitSlop={8} accessibilityLabel={'Add ' + item.name + ' to cart'}><Ionicons name="cart-outline" size={21} color={COLORS.cream} /></TouchableOpacity> : <Text style={styles.soldOutLabel}>Sold out</Text>}</View><View style={styles.purchaseRow}>{item.status === 'available' ? <View style={styles.stepper}><TouchableOpacity onPress={() => updateQuantity(item, -1)} style={styles.stepButton}><Text style={styles.stepText}>-</Text></TouchableOpacity><Text style={styles.quantity}>{quantity(item.id)}</Text><TouchableOpacity onPress={() => updateQuantity(item, 1)} style={styles.stepButton}><Text style={styles.stepText}>+</Text></TouchableOpacity></View> : <Text style={styles.outOfStock}>Out of stock</Text>}<Text style={styles.price}>{money(item.price)}</Text></View></View></TouchableOpacity>}
         ListEmptyComponent={loading ? <ActivityIndicator style={styles.loading} size="large" color={COLORS.mint} /> : <View style={styles.empty}><Ionicons name="basket-outline" size={34} color={COLORS.muted} /><Text style={styles.emptyText}>No {config.title.toLowerCase()} available yet.</Text></View>}
       />
       <CartToast visible={Boolean(cartToast)} message={cartToast} onDismiss={() => setCartToast('')} />
@@ -217,6 +211,8 @@ const styles = StyleSheet.create({
   stepButton: { width: 15, height: 15, borderRadius: 8, borderWidth: 0.5, borderColor: COLORS.muted, alignItems: 'center', justifyContent: 'center' },
   stepText: { color: COLORS.muted, fontSize: 12, fontWeight: '800', lineHeight: 14 },
   quantity: { color: COLORS.navy, fontSize: 10, fontWeight: '800' },
+  soldOutLabel: { color: '#FFD9D9', fontSize: 11, fontWeight: '800' },
+  outOfStock: { color: '#FFD9D9', fontSize: 11, fontWeight: '700' },
   price: { color: COLORS.cream, fontSize: 12, fontWeight: '800' },
   loading: { marginTop: 54 },
   empty: { alignItems: 'center', gap: 10, marginTop: 54 },

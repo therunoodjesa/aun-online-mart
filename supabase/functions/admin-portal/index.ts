@@ -248,10 +248,10 @@ async function confirmTransfer(db: ReturnType<typeof admin>, intentId: string) {
   if (intent.status === 'paid') return { order_id: intent.order_id, already_confirmed: true };
   if (intent.status !== 'pending') throw new Error(`This transfer cannot be confirmed while it is ${intent.status}.`);
 
-  const { error: paymentError } = await db.from('payment_intents').update({ status: 'paid', paid_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', intent.id).eq('status', 'pending');
-  if (paymentError) throw new Error(paymentError.message);
   const { error: orderError } = await db.from('orders').update({ payment_status: 'paid', amount_paid: Number(intent.amount_kobo) / 100 }).eq('id', intent.order_id);
   if (orderError) throw new Error(orderError.message);
+  const { error: paymentError } = await db.from('payment_intents').update({ status: 'paid', paid_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', intent.id).eq('status', 'pending');
+  if (paymentError) throw new Error(paymentError.message);
   await db.from('order_updates').insert({ order_id: intent.order_id, message: 'Bank transfer confirmed — your order is now being processed', update_type: 'system' });
 
   // Best effort: confirmation must succeed even if an email provider is temporarily unavailable.
