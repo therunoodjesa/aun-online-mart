@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ExpoLinking from 'expo-linking';
+import * as WebBrowser from 'expo-web-browser';
 import { useCartStore } from '../../store/cartstore';
 import { supabase } from '../../lib/supabase';
 import { calculateCheckout } from '../../lib/checkout';
@@ -14,6 +15,10 @@ type PickupLocation = { id: string; name: string; pickup_location: string | null
 type ServerQuote = { subtotal: number; serviceFee: number; deliveryFee: number; total: number; rushHour?: { active?: boolean; standard_delivery_fee?: number; discounted_delivery_fee?: number; savings?: number } };
 const PENDING_PAYMENT_REFERENCE = 'aom_pending_paystack_reference';
 const money = (value: number) => `\u20A6${value.toLocaleString('en-NG')}`;
+
+// Completes a browser-auth handoff cleanly when the payment callback returns
+// to the web version of the app.
+WebBrowser.maybeCompleteAuthSession();
 
 export default function PaymentPage() {
   const router = useRouter();
@@ -120,7 +125,41 @@ export default function PaymentPage() {
     setPaymentReference(data.reference);
     await AsyncStorage.setItem(PENDING_PAYMENT_REFERENCE, data.reference);
     setPaymentMessage('Complete secure Paystack checkout. Your payment will be confirmed automatically when you return.');
-    await Linking.openURL(data.authorization_url);
+    try {
+      if (Platform.OS === 'web') {
+        // A same-tab navigation is reliable on mobile browsers. Opening a new
+        // tab after an async request is commonly blocked as a popup instead.
+        window.location.assign(data.authorization_url);
+        return;
+      }
+
+      // Native checkout needs a browser session rather than a plain external
+      // link, so Paystack can hand the reference back to this payment screen.
+      const result = await WebBrowser.openAuthSessionAsync(data.authorization_url, callbackUrl);
+      if (result.type === 'success') {
+        const parsed = ExpoLinking.parse(result.url);
+        const returned = parsed.queryParams?.reference ?? parsed.queryParams?.trxref;
+        const returnedValue = Array.isArray(returned) ? returned[0] : returned;
+        if (returnedValue) {
+          setReturnedFromCheckout(true);
+          setPaymentReference(returnedValue);
+          await AsyncStorage.setItem(PENDING_PAYMENT_REFERENCE, returnedValue);
+        }
+      } else if (result.type === 'cancel' || result.type === 'dismiss') {
+        checkoutOpenedRef.current = false;
+        setPaymentMessage('Checkout was closed before payment was completed. You can try again whenever you are ready.');
+      }
+    } catch {
+      // Keep a dependable fallback for devices that do not support an auth
+      // session, rather than leaving a successful Pay tap without feedback.
+      const supported = await Linking.canOpenURL(data.authorization_url);
+      if (!supported) {
+        checkoutOpenedRef.current = false;
+        setPaymentMessage('This device could not open Paystack. Please try again in your phone browser.');
+        return;
+      }
+      await Linking.openURL(data.authorization_url);
+    }
   };
   const submitBankTransfer = async () => {
     if (!items.length) return;

@@ -23,6 +23,9 @@
     "updates": {
       "url": "https://u.expo.dev/cb7a38fe-e03e-40ad-8c90-95337b7dbc4c"
     },
-    "android": {}
+    "android": {},
+    "plugins": [
+      "expo-web-browser"
+    ]
   }
 }
