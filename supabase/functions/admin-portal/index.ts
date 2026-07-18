@@ -6,7 +6,8 @@ type AdminRequest =
   | { action: 'review_vendor'; application_id: string; decision: 'approved' | 'rejected'; reviewer_note?: string }
   | { action: 'update_payout'; payout_id: string; status: 'processing' | 'paid' | 'rejected'; note?: string }
   | { action: 'assign_dispatch'; order_id: string; rider_name: string; rider_phone: string }
-  | { action: 'update_dispatch'; order_id: string; status: 'picked_up' | 'delivered' };
+  | { action: 'update_dispatch'; order_id: string; status: 'picked_up' | 'delivered' }
+  | { action: 'update_home_promo'; promotion: { heading: string; message: string; background_image_url?: string | null; background_color?: string; cta_label: string; cta_href: string } };
 
 async function requireAdmin(request: Request) {
   const user = await getUser(request);
@@ -41,6 +42,9 @@ async function dashboard(db: ReturnType<typeof admin>) {
   if (allOrdersError) throw new Error(allOrdersError.message);
   if (salesOrdersError) throw new Error(salesOrdersError.message);
   if (vendorCountError) throw new Error(vendorCountError.message);
+
+  const { data: homePromo, error: homePromoError } = await db.from('home_promotions').select('heading, message, background_image_url, background_color, cta_label, cta_href, updated_at').eq('id', true).maybeSingle();
+  if (homePromoError) throw new Error(homePromoError.message);
 
   const orderIds = (intents ?? []).map((intent) => intent.order_id).filter(Boolean);
   const { data: orders, error: ordersError } = orderIds.length
@@ -133,7 +137,22 @@ async function dashboard(db: ReturnType<typeof admin>) {
     dispatch_queue: dispatchRows ?? [],
     delivery_riders: riderRows ?? [],
     orders: adminOrders,
+    home_promo: homePromo,
   };
+}
+
+async function updateHomePromo(db: ReturnType<typeof admin>, promotion: { heading: string; message: string; background_image_url?: string | null; background_color?: string; cta_label: string; cta_href: string }) {
+  const heading = promotion.heading.trim();
+  const message = promotion.message.trim();
+  const ctaLabel = promotion.cta_label.trim();
+  const ctaHref = promotion.cta_href.trim();
+  if (!heading || !message || !ctaLabel || !ctaHref) throw new Error('Add a heading, message, button label and destination.');
+  if (heading.length > 70 || message.length > 220 || ctaLabel.length > 32 || ctaHref.length > 500) throw new Error('Keep the Today’s Pick content short enough for the home screen.');
+  const backgroundImage = promotion.background_image_url?.trim() || null;
+  const backgroundColor = /^#[0-9a-fA-F]{6}$/.test(promotion.background_color?.trim() ?? '') ? promotion.background_color!.trim() : '#01193D';
+  const { data, error } = await db.from('home_promotions').upsert({ id: true, heading, message, background_image_url: backgroundImage, background_color: backgroundColor, cta_label: ctaLabel, cta_href: ctaHref, updated_at: new Date().toISOString() }).select('heading, message, background_image_url, background_color, cta_label, cta_href, updated_at').single();
+  if (error) throw new Error(error.message);
+  return { home_promo: data };
 }
 
 async function notifyDispatch(db: ReturnType<typeof admin>, order: { id: string; user_id: string | null; order_number: string }, title: string, body: string) {
@@ -285,6 +304,7 @@ Deno.serve(async (request) => {
     if (body.action === 'update_payout') return json(await updatePayout(db, body.payout_id, body.status, body.note));
     if (body.action === 'assign_dispatch') return json(await assignDispatch(db, body.order_id, body.rider_name, body.rider_phone));
     if (body.action === 'update_dispatch') return json(await updateDispatch(db, body.order_id, body.status));
+    if (body.action === 'update_home_promo') return json(await updateHomePromo(db, body.promotion));
     if (body.action === 'review_vendor') {
       if (!['approved', 'rejected'].includes(body.decision)) return json({ error: 'Choose approve or reject.' }, 400);
       const { error } = await db.from('vendor_applications').update({ status: body.decision, reviewer_note: body.reviewer_note?.trim() || null, reviewed_at: new Date().toISOString() }).eq('id', body.application_id).eq('status', 'pending');

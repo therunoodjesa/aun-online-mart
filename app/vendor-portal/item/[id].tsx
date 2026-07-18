@@ -3,15 +3,17 @@ import { ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, Text, TextInp
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../../../lib/supabase';
 import type { ReactNode } from 'react';
 
 type Option = { id?: string; option_group: string; name: string; price_modifier: string; is_available: boolean; selection_mode?: 'multiple' | 'single' };
 type OptionSuggestion = { group: string; choices: { name: string; price_modifier: string }[]; selection_mode: 'multiple' | 'single' };
 type ExtraPlacement = { section: 'marketplace' | 'supermarket'; category: string };
-const marketplaceCategories = ['meals', 'cakes', 'fast-food', 'ice-cream', 'dairy'];
+const marketplaceCategories = ['meals', 'cakes', 'fast-food', 'ice-cream', 'dairy', 'drinks'];
 const supermarketCategories = ['all-products', 'baking-stuff', 'beauty-hygiene', 'electronics', 'fragrances', 'groceries'];
 let extraPlacementControls: ReactNode = null;
+let imageUploadControl: ReactNode = null;
 let optionModesByGroup: Record<string, 'multiple' | 'single'> = {};
 let updateOptionGroupMode: ((group: string, mode: 'multiple' | 'single') => void) | null = null;
 
@@ -30,6 +32,7 @@ export default function CatalogueItemEditor() {
   const [subcategory, setSubcategory] = useState('');
   const [extraPlacements, setExtraPlacements] = useState<ExtraPlacement[]>([]);
   const [imageUrl, setImageUrl] = useState('');
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [available, setAvailable] = useState(true);
   const [options, setOptions] = useState<Option[]>([]);
   const [suggestions, setSuggestions] = useState<OptionSuggestion[]>([]);
@@ -78,6 +81,25 @@ export default function CatalogueItemEditor() {
   }, []);
 
   const updateOption = (index: number, patch: Partial<Option>) => setOptions((current) => current.map((option, currentIndex) => currentIndex === index ? { ...option, ...patch } : option));
+  const chooseImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) { Alert.alert('Photo access needed', 'Allow photo access to add a product image from this device. You can also paste an image URL.'); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [4, 3], quality: 0.82 });
+    if (result.canceled || !result.assets[0]) return;
+    const asset = result.assets[0];
+    setUploadingImage(true);
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      if (!auth.user) throw new Error('Please sign in again before uploading an image.');
+      const extension = asset.fileName?.split('.').pop()?.replace(/[^a-zA-Z0-9]/g, '') || asset.mimeType?.split('/').pop() || 'jpg';
+      const path = `vendors/${auth.user.id}/${Date.now()}.${extension}`;
+      const response = await fetch(asset.uri);
+      const { error } = await supabase.storage.from('product-images').upload(path, await response.arrayBuffer(), { contentType: asset.mimeType ?? 'image/jpeg', upsert: false });
+      if (error) throw error;
+      setImageUrl(supabase.storage.from('product-images').getPublicUrl(path).data.publicUrl);
+    } catch (error) { Alert.alert('Could not upload image', error instanceof Error ? error.message : 'Please try again or paste a public image URL.'); }
+    finally { setUploadingImage(false); }
+  };
   const useSuggestion = (suggestion: OptionSuggestion) => setOptions((current) => {
     const existing = new Set(current.map((option) => `${option.option_group.toLowerCase()}::${option.name.toLowerCase()}`));
     const additions = suggestion.choices.filter((choice) => !existing.has(`${suggestion.group.toLowerCase()}::${choice.name.toLowerCase()}`)).map((choice) => ({ option_group: suggestion.group, name: choice.name, price_modifier: choice.price_modifier, is_available: true, selection_mode: suggestion.selection_mode }));
@@ -92,7 +114,12 @@ export default function CatalogueItemEditor() {
     const parsedStock = stockQuantity.trim() === '' ? null : Math.max(0, Math.floor(Number(stockQuantity)));
     if (stockQuantity.trim() !== '' && !Number.isFinite(parsedStock)) { setSaving(false); Alert.alert('Check the stock quantity', 'Enter a whole number that is zero or higher.'); return; }
     if (isNew && parsedStock === null) { setSaving(false); Alert.alert('Add the stock quantity', 'Enter how many units are available before adding this item to your catalogue.'); return; }
-    const payload = { name: name.trim(), description: description.trim() || null, price: Number(price), stock_quantity: parsedStock, category: category.trim() || null, marketplace_category: marketplaceCategory || null, marketplace_subcategory: subcategory.trim() || null, image_url: imageUrl.trim() || null, status: available ? (parsedStock === 0 ? 'sold_out' : 'available') : 'hidden' };
+    let nextSortOrder: number | undefined;
+    if (isNew) {
+      const { data: existingProducts } = await supabase.from('products').select('sort_order').eq('vendor_id', vendor.id);
+      nextSortOrder = Math.max(0, ...(existingProducts ?? []).map((product) => Number(product.sort_order ?? 0))) + 1;
+    }
+    const payload = { name: name.trim(), description: description.trim() || null, price: Number(price), stock_quantity: parsedStock, category: category.trim() || null, marketplace_category: marketplaceCategory || null, marketplace_subcategory: subcategory.trim() || null, image_url: imageUrl.trim() || null, status: available ? (parsedStock === 0 ? 'sold_out' : 'available') : 'hidden', ...(isNew ? { sort_order: nextSortOrder } : {}) };
     const result = isNew ? await supabase.from('products').insert({ ...payload, vendor_id: vendor.id }).select('id').single() : await supabase.from('products').update(payload).eq('id', id).select('id').single();
     if (result.error || !result.data) { setSaving(false); Alert.alert('Could not save item', result.error?.message ?? 'Please try again.'); return; }
     const productId = result.data.id;
@@ -116,6 +143,7 @@ export default function CatalogueItemEditor() {
   };
 
   extraPlacementControls = <ExtraPlacementControls placements={extraPlacements} onChange={setExtraPlacements} />;
+  imageUploadControl = <TouchableOpacity disabled={uploadingImage} onPress={() => void chooseImage()} style={{ height: 44, borderRadius: 9, borderWidth: 1, borderColor: '#25B68A', backgroundColor: '#E1F6F0', alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, marginBottom: 8 }}>{uploadingImage ? <ActivityIndicator color="#176E73" /> : <><Ionicons name="image-outline" size={19} color="#176E73" /><Text style={{ color: '#176E73', fontSize: 13, fontWeight: '800' }}>{imageUrl ? 'Replace photo from device' : 'Upload photo from device'}</Text></>}</TouchableOpacity>;
   optionModesByGroup = Object.fromEntries(options.filter((option) => option.option_group.trim()).map((option) => [option.option_group.trim().toLowerCase(), option.selection_mode ?? 'multiple']));
   updateOptionGroupMode = (group, mode) => setOptions((current) => current.map((option) => option.option_group.trim().toLowerCase() === group.trim().toLowerCase() ? { ...option, selection_mode: mode } : option));
   if (loading) return <View style={styles.loading}><ActivityIndicator size="large" color="#68ECCB" /></View>;
@@ -124,7 +152,7 @@ export default function CatalogueItemEditor() {
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) { return <View style={styles.section}><Text style={styles.sectionTitle}>{title}</Text>{children}</View>; }
-function Field({ label, compact, multiline, ...props }: { label: string; compact?: boolean; multiline?: boolean } & React.ComponentProps<typeof TextInput>) { const group = String(props.value ?? '').trim(); const mode = optionModesByGroup[group.toLowerCase()] ?? 'multiple'; return <View style={[styles.field, compact && styles.compactField]}><Text style={styles.fieldLabel}>{label}</Text><TextInput {...props} multiline={multiline} style={[styles.input, multiline && styles.textArea]} placeholderTextColor="#99A0AA" />{label === 'Marketplace subcategory' ? extraPlacementControls : null}{label === 'Group' && group ? <View style={{ marginTop: 8 }}><Text style={{ color: '#748191', fontSize: 12, fontWeight: '700', marginBottom: 6 }}>Customer selection</Text><View style={{ flexDirection: 'row', gap: 8 }}>{(['single', 'multiple'] as const).map((nextMode) => <TouchableOpacity key={nextMode} onPress={() => updateOptionGroupMode?.(group, nextMode)} style={{ borderRadius: 16, borderWidth: 1, borderColor: mode === nextMode ? '#25B68A' : '#C9D1DA', backgroundColor: mode === nextMode ? '#E1F6F0' : '#FFFFFF', paddingHorizontal: 11, paddingVertical: 6 }}><Text style={{ color: mode === nextMode ? '#176E73' : '#617081', fontSize: 12, fontWeight: '700' }}>{nextMode === 'single' ? 'Pick one' : 'Pick many'}</Text></TouchableOpacity>)}</View></View> : null}</View>; }
+function Field({ label, compact, multiline, ...props }: { label: string; compact?: boolean; multiline?: boolean } & React.ComponentProps<typeof TextInput>) { const group = String(props.value ?? '').trim(); const mode = optionModesByGroup[group.toLowerCase()] ?? 'multiple'; return <View style={[styles.field, compact && styles.compactField]}><Text style={styles.fieldLabel}>{label}</Text>{label === 'Image URL' ? imageUploadControl : null}<TextInput {...props} multiline={multiline} style={[styles.input, multiline && styles.textArea]} placeholderTextColor="#99A0AA" />{label === 'Image URL' ? <Text style={{ color: '#7B8794', fontSize: 12, marginTop: 6 }}>Or paste a public image URL.</Text> : null}{label === 'Marketplace subcategory' ? extraPlacementControls : null}{label === 'Group' && group ? <View style={{ marginTop: 8 }}><Text style={{ color: '#748191', fontSize: 12, fontWeight: '700', marginBottom: 6 }}>Customer selection</Text><View style={{ flexDirection: 'row', gap: 8 }}>{(['single', 'multiple'] as const).map((nextMode) => <TouchableOpacity key={nextMode} onPress={() => updateOptionGroupMode?.(group, nextMode)} style={{ borderRadius: 16, borderWidth: 1, borderColor: mode === nextMode ? '#25B68A' : '#C9D1DA', backgroundColor: mode === nextMode ? '#E1F6F0' : '#FFFFFF', paddingHorizontal: 11, paddingVertical: 6 }}><Text style={{ color: mode === nextMode ? '#176E73' : '#617081', fontSize: 12, fontWeight: '700' }}>{nextMode === 'single' ? 'Pick one' : 'Pick many'}</Text></TouchableOpacity>)}</View></View> : null}</View>; }
 
 function ExtraPlacementControls({ placements, onChange }: { placements: ExtraPlacement[]; onChange: (placements: ExtraPlacement[]) => void }) {
   const update = (index: number, patch: Partial<ExtraPlacement>) => onChange(placements.map((placement, currentIndex) => currentIndex === index ? { ...placement, ...patch } : placement));

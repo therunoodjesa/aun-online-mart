@@ -7,7 +7,7 @@ import { supabase } from '../../../../lib/supabase';
 import { useCartStore } from '../../../../store/cartstore';
 import { CartToast } from '../../../../components/CartToast';
 
-type CategoryProduct = { id: string; vendor_id: string; name: string; price: number; image_url: string | null; marketplace_subcategory: string | null; category: string | null; status: 'available' | 'sold_out' };
+type CategoryProduct = { id: string; vendor_id: string; name: string; price: number; image_url: string | null; marketplace_subcategory: string | null; category: string | null; sort_order: number | null; status: 'available' | 'sold_out' };
 type CategoryConfig = { title: string; description: string; image: number; subcategories: string[] };
 
 const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
@@ -37,17 +37,17 @@ export default function MarketplaceCategoryPage() {
   useEffect(() => {
     const loadProducts = async () => {
       setLoading(true);
-      const fields = 'id, vendor_id, name, price, image_url, marketplace_subcategory, category, status';
+      const fields = 'id, vendor_id, name, price, image_url, marketplace_subcategory, category, sort_order, status';
       const [{ data, error }, { data: placementRows }] = await Promise.all([
-        supabase.from('products').select(fields).eq('marketplace_category', key).in('status', ['available', 'sold_out']),
+        supabase.from('products').select(fields).eq('marketplace_category', key).in('status', ['available', 'sold_out']).order('sort_order').order('name'),
         supabase.from('product_category_placements').select('product_id').eq('section', 'marketplace').eq('category', key),
       ]);
       const placementIds = (placementRows ?? []).map((placement) => placement.product_id);
       const { data: placedProducts } = placementIds.length ? await supabase.from('products').select(fields).in('id', placementIds).in('status', ['available', 'sold_out']) : { data: [] as CategoryProduct[] };
       if (error) {
-        const legacy = await supabase.from('products').select(fields).eq('category', config.title).in('status', ['available', 'sold_out']);
-        setProducts(Array.from(new Map([...(legacy.data ?? []) as CategoryProduct[], ...(placedProducts ?? []) as CategoryProduct[]].map((product) => [product.id, product])).values()));
-      } else setProducts(Array.from(new Map([...(data ?? []) as CategoryProduct[], ...(placedProducts ?? []) as CategoryProduct[]].map((product) => [product.id, product])).values()));
+        const legacy = await supabase.from('products').select(fields).eq('category', config.title).in('status', ['available', 'sold_out']).order('sort_order').order('name');
+        setProducts(Array.from(new Map([...(legacy.data ?? []) as CategoryProduct[], ...(placedProducts ?? []) as CategoryProduct[]].map((product) => [product.id, product])).values()).sort((a, b) => Number(a.sort_order ?? Number.MAX_SAFE_INTEGER) - Number(b.sort_order ?? Number.MAX_SAFE_INTEGER)));
+      } else setProducts(Array.from(new Map([...(data ?? []) as CategoryProduct[], ...(placedProducts ?? []) as CategoryProduct[]].map((product) => [product.id, product])).values()).sort((a, b) => Number(a.sort_order ?? Number.MAX_SAFE_INTEGER) - Number(b.sort_order ?? Number.MAX_SAFE_INTEGER)));
       setLoading(false);
     };
     void loadProducts();

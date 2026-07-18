@@ -23,6 +23,7 @@ type Product = {
   image_url: string | null;
   category: string | null;
   marketplace_category: string | null;
+  sort_order: number | null;
   status: 'available' | 'sold_out';
 };
 type SearchResult = { id: string; type: 'vendor' | 'marketplace-product' | 'supermarket-product' | 'cafeteria-product'; title: string; subtitle: string; vendorId?: string; category?: string | null };
@@ -63,10 +64,10 @@ export default function SupermarketCategoryPage() {
       setLoading(true);
       let request = supabase
         .from('products')
-        .select('id, vendor_id, name, price, image_url, category, marketplace_category, status')
+        .select('id, vendor_id, name, price, image_url, category, marketplace_category, sort_order, status')
         .in('status', ['available', 'sold_out'])
         .is('marketplace_category', null)
-        .order('created_at', { ascending: false });
+        .order('sort_order').order('name');
       if (config.databaseCategory) request = request.eq('category', config.databaseCategory);
       const [{ data }, { data: placementRows }] = await Promise.all([
         request,
@@ -76,10 +77,10 @@ export default function SupermarketCategoryPage() {
       ]);
       const placementIds = (placementRows ?? []).map((placement) => placement.product_id);
       const { data: placedProducts } = placementIds.length
-        ? await supabase.from('products').select('id, vendor_id, name, price, image_url, category, marketplace_category, status').in('id', placementIds).in('status', ['available', 'sold_out'])
+        ? await supabase.from('products').select('id, vendor_id, name, price, image_url, category, marketplace_category, sort_order, status').in('id', placementIds).in('status', ['available', 'sold_out'])
         : { data: [] as Product[] };
       if (mounted) {
-        setProducts(Array.from(new Map([...(data ?? []) as Product[], ...(placedProducts ?? []) as Product[]].map((product) => [product.id, product])).values()));
+        setProducts(Array.from(new Map([...(data ?? []) as Product[], ...(placedProducts ?? []) as Product[]].map((product) => [product.id, product])).values()).sort((a, b) => Number(a.sort_order ?? Number.MAX_SAFE_INTEGER) - Number(b.sort_order ?? Number.MAX_SAFE_INTEGER)));
         setLoading(false);
       }
     };

@@ -22,6 +22,7 @@ type Product = {
   image_url: string | null;
   category: string | null;
   status: string;
+  sort_order: number | null;
   is_meal_plan_eligible: boolean;
 };
 
@@ -81,6 +82,7 @@ export default function VendorPage() {
           image_url,
           category,
           status,
+          sort_order,
           is_meal_plan_eligible
         )
       `)
@@ -95,7 +97,9 @@ export default function VendorPage() {
       return;
     }
 
-    setVendor(data as Vendor);
+    const loadedVendor = data as Vendor;
+    loadedVendor.products = [...(loadedVendor.products ?? [])].sort((a, b) => Number(a.sort_order ?? Number.MAX_SAFE_INTEGER) - Number(b.sort_order ?? Number.MAX_SAFE_INTEGER));
+    setVendor(loadedVendor);
     setIsFavourite(await isFavourited('vendor', vendorId).catch(() => false));
   };
 

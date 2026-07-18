@@ -32,11 +32,11 @@ export default function CafeteriaProductPage() {
     const load = async () => {
       if (!productId) return;
       setLoading(true);
-      const { data } = await supabase.from('cafeteria_products').select('id, name, description, category, price, image_url, status, meal_plan_eligible').eq('id', productId).single();
+      const { data } = await supabase.from('cafeteria_products').select('id, name, description, category, categories, sort_order, price, image_url, status, meal_plan_eligible').eq('id', productId).single();
       if (!active) return;
       setProduct((data as Product | null) ?? null);
       const { data: optionData } = await supabase.from('cafeteria_product_options').select('id, option_group, name, price_modifier, is_available, selection_mode').eq('product_id', productId).eq('is_available', true);
-      const { data: relatedRows } = data ? await supabase.from('cafeteria_products').select('id, name, description, category, price, image_url, status, meal_plan_eligible').eq('category', (data as Product).category).eq('status', 'available').neq('id', productId).limit(4) : { data: [] };
+      const { data: relatedRows } = data ? await supabase.from('cafeteria_products').select('id, name, description, category, categories, sort_order, price, image_url, status, meal_plan_eligible').contains('categories', [(data as Product).category]).eq('status', 'available').neq('id', productId).order('sort_order').limit(4) : { data: [] };
       if (active) { setOptions((optionData ?? []) as ProductOption[]); setRelated((relatedRows ?? []) as Product[]); setFavourite(await isFavourited('cafeteria_product', productId).catch(() => false)); setLoading(false); }
     };
     void load();

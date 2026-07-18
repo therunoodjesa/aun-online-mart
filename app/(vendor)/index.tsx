@@ -6,7 +6,7 @@ import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 
 type Vendor = { id: string; name: string; is_open: boolean | null; description?: string | null; banner_url?: string | null; category?: string | null; location?: string | null; pickup_location?: string | null; pickup_instructions?: string | null; important_message?: string | null; average_prep_time?: string | null };
-type Product = { id: string; name: string; category: string | null; price: number; stock_quantity: number | null; status: 'available' | 'sold_out' | 'hidden' };
+type Product = { id: string; name: string; category: string | null; price: number; stock_quantity: number | null; sort_order: number | null; status: 'available' | 'sold_out' | 'hidden' };
 type Page = 'dashboard' | 'inventory' | 'orders' | 'analytics' | 'availability' | 'payouts' | 'settings';
 const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 type DaySchedule = { enabled: boolean; opensAt: string; closesAt: string };
@@ -52,7 +52,7 @@ export default function VendorPortal() {
     if (vendorRow) {
       setVendor(vendorRow as Vendor);
       const [{ data }, { data: savedSchedule }] = await Promise.all([
-        supabase.from('products').select('id, name, category, price, stock_quantity, status').eq('vendor_id', vendorRow.id).order('created_at', { ascending: false }),
+        supabase.from('products').select('id, name, category, price, stock_quantity, sort_order, status').eq('vendor_id', vendorRow.id).order('sort_order').order('name'),
         supabase.from('vendor_schedules').select('weekly_schedule').eq('vendor_id', vendorRow.id).maybeSingle(),
       ]);
       setProducts((data ?? []) as Product[]);
@@ -79,6 +79,20 @@ export default function VendorPortal() {
     setProducts((items) => items.map((item) => item.id === product.id ? { ...item, stock_quantity, status } : item));
     const { error } = await supabase.from('products').update({ stock_quantity, status }).eq('id', product.id);
     if (error) { void load(); Alert.alert('Could not update stock', error.message); }
+  };
+  const moveProduct = async (product: Product, direction: -1 | 1) => {
+    const ordered = [...products].sort((a, b) => Number(a.sort_order ?? Number.MAX_SAFE_INTEGER) - Number(b.sort_order ?? Number.MAX_SAFE_INTEGER));
+    const index = ordered.findIndex((item) => item.id === product.id);
+    const neighbour = ordered[index + direction];
+    if (index < 0 || !neighbour) return;
+    const productOrder = product.sort_order ?? index + 1;
+    const neighbourOrder = neighbour.sort_order ?? index + direction + 1;
+    setProducts((items) => items.map((item) => item.id === product.id ? { ...item, sort_order: neighbourOrder } : item.id === neighbour.id ? { ...item, sort_order: productOrder } : item));
+    const [{ error: firstError }, { error: secondError }] = await Promise.all([
+      supabase.from('products').update({ sort_order: neighbourOrder }).eq('id', product.id),
+      supabase.from('products').update({ sort_order: productOrder }).eq('id', neighbour.id),
+    ]);
+    if (firstError || secondError) { void load(); Alert.alert('Could not change placement', firstError?.message ?? secondError?.message ?? 'Please try again.'); }
   };
   const saveSchedule = async () => {
     if (!vendor) return;
@@ -108,7 +122,7 @@ export default function VendorPortal() {
     { text: 'Mark sold out', style: 'destructive', onPress: () => { void (async () => { const { data, error } = await supabase.functions.invoke('vendor-availability', { body: { action: 'mark_all_sold_out' } }); if (error || data?.error) { Alert.alert('Could not update items', data?.error ?? error?.message ?? 'Please try again.'); return; } setProducts((items) => items.map((item) => item.status === 'available' ? { ...item, status: 'sold_out' } : item)); Alert.alert('Items updated', `${data.updated ?? 0} item${data.updated === 1 ? '' : 's'} marked sold out.`); })(); } },
   ]);
   if (width < 760) return <View style={styles.mobile}><StatusBar style="light" /><Ionicons name="desktop-outline" size={52} color="#68ECCB" /><Text style={styles.mobileTitle}>Continue on desktop</Text><Text style={styles.mobileText}>Your vendor portal is designed for a wider screen, where you can comfortably manage orders, stock, and availability.</Text></View>;
-  return <View style={styles.screen}><StatusBar style="light" /><View style={styles.top}><View style={styles.brand}><Ionicons name="storefront-outline" size={22} color="#68ECCB" /><Text style={styles.storeName}>{vendor?.name ?? 'Your store'}</Text><Text style={styles.portal}>Vendor portal</Text></View><View style={styles.topRight}><View style={styles.storeState}><View style={[styles.dot, !vendor?.is_open && styles.dotClosed]} /><Text style={styles.topText}>Store {vendor?.is_open ? 'open' : 'closed'}</Text></View><View style={styles.avatar}><Text style={styles.avatarText}>{(vendor?.name ?? 'VS').slice(0, 2).toUpperCase()}</Text></View></View></View><View style={styles.main}><Sidebar page={page} setPage={setPage} newOrderCount={newOrderCount} /><ScrollView style={styles.workspace} contentContainerStyle={styles.workspaceContent} showsVerticalScrollIndicator>{loading ? <View style={styles.center}><ActivityIndicator size="large" color="#25B68A" /></View> : !vendor ? <VendorApplication /> : page === 'dashboard' ? <Dashboard vendor={vendor} products={products} onOrders={() => setPage('orders')} /> : page === 'orders' ? <Orders vendor={vendor} /> : page === 'analytics' ? <Analytics /> : page === 'inventory' ? <Inventory vendor={vendor} rows={rows} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} counts={counts} setOpen={setOpen} setStatus={setStatus} setStock={setStock} /> : page === 'availability' ? <Availability vendor={vendor} schedule={schedule} setSchedule={setSchedule} setOpen={setOpen} onSave={saveSchedule} saving={savingSchedule} onPause={pauseStore} onCloseForToday={closeForToday} onMarkAllSoldOut={markAllSoldOut} /> : page === 'payouts' ? <Payouts vendor={vendor} /> : page === 'settings' ? <Settings vendor={vendor} onSaved={(details) => setVendor({ ...vendor, ...details })} /> : <ComingSoon page={page} />}</ScrollView></View></View>;
+  return <View style={styles.screen}><StatusBar style="light" /><View style={styles.top}><View style={styles.brand}><Ionicons name="storefront-outline" size={22} color="#68ECCB" /><Text style={styles.storeName}>{vendor?.name ?? 'Your store'}</Text><Text style={styles.portal}>Vendor portal</Text></View><View style={styles.topRight}><View style={styles.storeState}><View style={[styles.dot, !vendor?.is_open && styles.dotClosed]} /><Text style={styles.topText}>Store {vendor?.is_open ? 'open' : 'closed'}</Text></View><View style={styles.avatar}><Text style={styles.avatarText}>{(vendor?.name ?? 'VS').slice(0, 2).toUpperCase()}</Text></View></View></View><View style={styles.main}><Sidebar page={page} setPage={setPage} newOrderCount={newOrderCount} /><ScrollView style={styles.workspace} contentContainerStyle={styles.workspaceContent} showsVerticalScrollIndicator>{loading ? <View style={styles.center}><ActivityIndicator size="large" color="#25B68A" /></View> : !vendor ? <VendorApplication /> : page === 'dashboard' ? <Dashboard vendor={vendor} products={products} onOrders={() => setPage('orders')} /> : page === 'orders' ? <Orders vendor={vendor} /> : page === 'analytics' ? <Analytics /> : page === 'inventory' ? <Inventory vendor={vendor} rows={rows} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} counts={counts} setOpen={setOpen} setStatus={setStatus} setStock={setStock} moveProduct={moveProduct} /> : page === 'availability' ? <Availability vendor={vendor} schedule={schedule} setSchedule={setSchedule} setOpen={setOpen} onSave={saveSchedule} saving={savingSchedule} onPause={pauseStore} onCloseForToday={closeForToday} onMarkAllSoldOut={markAllSoldOut} /> : page === 'payouts' ? <Payouts vendor={vendor} /> : page === 'settings' ? <Settings vendor={vendor} onSaved={(details) => setVendor({ ...vendor, ...details })} /> : <ComingSoon page={page} />}</ScrollView></View></View>;
 }
 
 function Sidebar({ page, setPage, newOrderCount }: { page: Page; setPage: (page: Page) => void; newOrderCount: number }) {
@@ -123,16 +137,28 @@ function Sidebar({ page, setPage, newOrderCount }: { page: Page; setPage: (page:
   ];
   return <View style={styles.sidebar}><Text style={styles.menu}>MENU</Text>{items.map((item) => <TouchableOpacity key={item.id} style={[styles.nav, page === item.id && styles.navActive]} onPress={() => setPage(item.id)}><Ionicons name={item.icon} size={19} color={page === item.id ? '#176E73' : '#7D7D7D'} /><Text style={[styles.navText, page === item.id && styles.navTextActive]}>{item.label}</Text>{item.id === 'orders' && newOrderCount > 0 ? <View style={styles.ordersDot} /> : null}</TouchableOpacity>)}</View>;
 }
-function Inventory({ vendor, rows, search, setSearch, filter, setFilter, counts, setOpen, setStatus, setStock }: { vendor: Vendor; rows: Product[]; search: string; setSearch: (value: string) => void; filter: 'all' | Product['status']; setFilter: (value: 'all' | Product['status']) => void; counts: Record<'all' | Product['status'], number>; setOpen: (value: boolean) => void; setStatus: (item: Product, value: Product['status']) => void; setStock: (item: Product, change: number) => void }) {
+function Inventory({ vendor, rows, search, setSearch, filter, setFilter, counts, setOpen, setStatus, setStock, moveProduct }: { vendor: Vendor; rows: Product[]; search: string; setSearch: (value: string) => void; filter: 'all' | Product['status']; setFilter: (value: 'all' | Product['status']) => void; counts: Record<'all' | Product['status'], number>; setOpen: (value: boolean) => void; setStatus: (item: Product, value: Product['status']) => void; setStock: (item: Product, change: number) => void; moveProduct: (item: Product, direction: -1 | 1) => void }) {
   const tabs: { id: 'all' | Product['status']; label: string }[] = [{ id: 'all', label: 'All items' }, { id: 'available', label: 'Available' }, { id: 'sold_out', label: 'Sold out' }, { id: 'hidden', label: 'Hidden' }];
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [sortOpen, setSortOpen] = useState(false);
+  const [sortBy, setSortBy] = useState<'placement' | 'name' | 'price_low' | 'price_high' | 'stock_low'>('placement');
+  const sortedRows = useMemo(() => [...rows].sort((a, b) => {
+    if (sortBy === 'name') return a.name.localeCompare(b.name);
+    if (sortBy === 'price_low') return Number(a.price) - Number(b.price);
+    if (sortBy === 'price_high') return Number(b.price) - Number(a.price);
+    if (sortBy === 'stock_low') return Number(a.stock_quantity ?? Number.MAX_SAFE_INTEGER) - Number(b.stock_quantity ?? Number.MAX_SAFE_INTEGER);
+    return Number(a.sort_order ?? Number.MAX_SAFE_INTEGER) - Number(b.sort_order ?? Number.MAX_SAFE_INTEGER);
+  }), [rows, sortBy]);
   return <>
-    <Head title="Inventory" subtitle="Manage your menu items, prices, and stock status." actions />
+    <Head title="Inventory" subtitle="Manage your menu items, prices, stock status, and customer-facing placement." actions />
     <StoreNotice vendor={vendor} setOpen={setOpen} />
     <View style={styles.tabs}>{tabs.map((tab) => <TouchableOpacity key={tab.id} onPress={() => setFilter(tab.id)} style={[styles.tab, filter === tab.id && styles.tabActive]}><Text style={[styles.tabText, filter === tab.id && styles.tabTextActive]}>{tab.label}</Text><Text style={styles.count}>{counts[tab.id]}</Text></TouchableOpacity>)}</View>
-    <View style={styles.tools}><View style={styles.search}><Ionicons name="search-outline" size={18} color="#7D7D7D" /><TextInput value={search} onChangeText={setSearch} placeholder="Search menu items..." placeholderTextColor="#999999" style={styles.searchInput} /></View><View style={{ flex: 1 }} /><Button icon="options-outline" label="Filter" /><Button icon="swap-vertical-outline" label="Sort" /></View>
+    <View style={styles.tools}><View style={styles.search}><Ionicons name="search-outline" size={18} color="#7D7D7D" /><TextInput value={search} onChangeText={setSearch} placeholder="Search menu items..." placeholderTextColor="#999999" style={styles.searchInput} /></View><View style={{ flex: 1 }} /><Button icon="options-outline" label="Filter" onPress={() => { setFilterOpen((open) => !open); setSortOpen(false); }} /><Button icon="swap-vertical-outline" label="Sort" onPress={() => { setSortOpen((open) => !open); setFilterOpen(false); }} /></View>
+    {filterOpen ? <View style={{ borderWidth: 1, borderColor: '#DCE5EA', borderRadius: 10, backgroundColor: '#F8FAFB', padding: 12, marginBottom: 14 }}><Text style={{ color: '#526273', fontSize: 12, fontWeight: '800', marginBottom: 8 }}>Filter by status</Text><View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>{tabs.map((option) => <TouchableOpacity key={option.id} onPress={() => { setFilter(option.id); setFilterOpen(false); }} style={{ borderWidth: 1, borderColor: filter === option.id ? '#25B68A' : '#D3DCE5', backgroundColor: filter === option.id ? '#E1F6F0' : '#FFFFFF', borderRadius: 16, paddingHorizontal: 11, paddingVertical: 7 }}><Text style={{ color: filter === option.id ? '#176E73' : '#647181', fontSize: 13, fontWeight: '700' }}>{option.label}</Text></TouchableOpacity>)}</View></View> : null}
+    {sortOpen ? <View style={{ borderWidth: 1, borderColor: '#DCE5EA', borderRadius: 10, backgroundColor: '#F8FAFB', padding: 12, marginBottom: 14 }}><Text style={{ color: '#526273', fontSize: 12, fontWeight: '800', marginBottom: 8 }}>Sort inventory</Text><View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>{([{ id: 'placement', label: 'Your placement' }, { id: 'name', label: 'Name A–Z' }, { id: 'price_low', label: 'Price low–high' }, { id: 'price_high', label: 'Price high–low' }, { id: 'stock_low', label: 'Low stock first' }] as const).map((option) => <TouchableOpacity key={option.id} onPress={() => { setSortBy(option.id); setSortOpen(false); }} style={{ borderWidth: 1, borderColor: sortBy === option.id ? '#25B68A' : '#D3DCE5', backgroundColor: sortBy === option.id ? '#E1F6F0' : '#FFFFFF', borderRadius: 16, paddingHorizontal: 11, paddingVertical: 7 }}><Text style={{ color: sortBy === option.id ? '#176E73' : '#647181', fontSize: 13, fontWeight: '700' }}>{option.label}</Text></TouchableOpacity>)}</View></View> : null}
     <View style={styles.headerRow}><Text style={[styles.column, { flex: 2.2 }]}>ITEM</Text><Text style={styles.column}>PRICE</Text><Text style={styles.column}>STATUS</Text><Text style={styles.column}>ACTIONS</Text></View>
     <FlatList
-      data={rows}
+      data={sortedRows}
       keyExtractor={(item) => item.id}
       renderItem={({ item }) => <View style={styles.row}>
         <View style={styles.itemIcon}><Ionicons name="restaurant-outline" size={20} color="#68ECCB" /></View>
@@ -145,6 +171,8 @@ function Inventory({ vendor, rows, search, setSearch, filter, setFilter, counts,
             <Text style={styles.stockValue}>{item.stock_quantity === null ? 'Set stock' : String(item.stock_quantity)}</Text>
             <TouchableOpacity onPress={() => setStock(item, 1)} style={styles.stockButton}><Ionicons name="add" size={15} color="#176E73" /></TouchableOpacity>
           </View>
+          <TouchableOpacity onPress={() => moveProduct(item, -1)} style={styles.iconButton} accessibilityLabel={`Move ${item.name} earlier`}><Ionicons name="arrow-up-outline" size={18} color="#176E73" /></TouchableOpacity>
+          <TouchableOpacity onPress={() => moveProduct(item, 1)} style={styles.iconButton} accessibilityLabel={`Move ${item.name} later`}><Ionicons name="arrow-down-outline" size={18} color="#176E73" /></TouchableOpacity>
           <EditProductButton productId={item.id} />
           <TouchableOpacity onPress={() => item.status === 'available' ? setStatus(item, 'sold_out') : Number(item.stock_quantity ?? 0) > 0 ? setStatus(item, 'available') : Alert.alert('Add stock first', 'Use the plus button to add stock before making this item available.')} style={styles.iconButton}><Ionicons name={item.status === 'available' ? 'close-outline' : 'checkmark-outline'} size={19} color="#176E73" /></TouchableOpacity>
           <TouchableOpacity onPress={() => setStatus(item, item.status === 'hidden' ? (Number(item.stock_quantity ?? 0) === 0 ? 'sold_out' : 'available') : 'hidden')} style={styles.iconButton}><Ionicons name={item.status === 'hidden' ? 'eye-outline' : 'eye-off-outline'} size={18} color="#526273" /></TouchableOpacity>

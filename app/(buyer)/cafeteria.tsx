@@ -8,7 +8,7 @@ import { useCartStore } from '../../store/cartstore';
 
 const COLORS = { navy: '#01193D', cream: '#F8F3ED', mint: '#68ECCB', green: '#006D50', pale: '#E2F4EE', muted: '#A0A0A0' } as const;
 type Category = 'snacks' | 'lunch' | 'dinner';
-type Product = { id: string; name: string; description: string | null; category: Category; price: number; image_url: string | null; status: 'available' | 'sold_out' | 'hidden'; meal_plan_eligible: boolean };
+type Product = { id: string; name: string; description: string | null; category: Category; categories?: Category[] | null; sort_order?: number | null; price: number; image_url: string | null; status: 'available' | 'sold_out' | 'hidden'; meal_plan_eligible: boolean };
 const TABS: { id: Category; label: string; icon: keyof typeof Ionicons.glyphMap; note: string }[] = [
   { id: 'snacks', label: 'Snacks', icon: 'ice-cream-outline', note: 'Snacks are available around the clock. Some options may sell out before we can update the catalogue; an agent will contact you if a change is needed.' },
   { id: 'lunch', label: 'Lunch', icon: 'restaurant-outline', note: 'The ordering window for lunch closes by 2 pm daily. Availability can change as servings run out.' },
@@ -37,7 +37,7 @@ export default function CafeteriaPage() {
     let active = true;
     const load = async () => {
       setLoading(true);
-      const { data } = await supabase.from('cafeteria_products').select('id, name, description, category, price, image_url, status, meal_plan_eligible').eq('category', category).neq('status', 'hidden').order('created_at', { ascending: false });
+      const { data } = await supabase.from('cafeteria_products').select('id, name, description, category, categories, sort_order, price, image_url, status, meal_plan_eligible').contains('categories', [category]).neq('status', 'hidden').order('sort_order').order('name');
       if (active) { setProducts((data ?? []) as Product[]); setLoading(false); }
     };
     void load();

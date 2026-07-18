@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Image, ImageBackground, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, FlatList, Image, ImageBackground, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -32,6 +32,7 @@ const SUPERMARKET: { label: string; image: number; slug: string }[] = [
   { label: 'All products', image: require('../../assets/images/home/all-products.png'), slug: 'all-products' }, { label: 'Baking stuff', image: require('../../assets/images/home/bakingstuff.png'), slug: 'baking-stuff' }, { label: 'Beauty & Hygiene', image: require('../../assets/images/home/skincare.png'), slug: 'beauty-hygiene' }, { label: 'Electronics', image: require('../../assets/images/home/electronics.png'), slug: 'electronics' }, { label: 'Fragrances', image: require('../../assets/images/home/category-fragrances.png'), slug: 'fragrances' }, { label: 'Groceries', image: require('../../assets/images/home/groceries.png'), slug: 'groceries' },
 ];
 type HomeVendor = { id: string; name: string; category?: string | null; average_prep_time?: string | null; banner_url?: string | null; is_open?: boolean | null };
+type HomePromo = { heading: string; message: string; background_image_url: string | null; background_color: string; cta_label: string; cta_href: string };
 type SearchResult = { id: string; type: 'vendor' | 'product' | 'cafeteria-product'; title: string; subtitle: string; vendorId?: string; marketplaceCategory?: string | null; category?: string | null };
 const FALLBACK_VENDORS: HomeVendor[] = [
   { id: 'shollys', name: "Sholly's Restaurant", category: 'Native pot', average_prep_time: '50–80 mins' },
@@ -96,6 +97,7 @@ export default function BuyerHome() {
   const [name, setName] = useState(() => firstName(profile?.full_name));
   const [timeGreeting, setTimeGreeting] = useState(watGreeting);
   const [vendors, setVendors] = useState<HomeVendor[]>(FALLBACK_VENDORS);
+  const [homePromo, setHomePromo] = useState<HomePromo | null>(null);
   const [supermarketVendors, setSupermarketVendors] = useState<HomeVendor[]>([]);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [searchQuery, setSearchQuery] = useState('');
@@ -120,6 +122,14 @@ export default function BuyerHome() {
     updateGreeting();
     const timer = setInterval(updateGreeting, 60_000);
     return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const loadHomePromo = async () => {
+      const { data } = await supabase.from('home_promotions').select('heading, message, background_image_url, background_color, cta_label, cta_href').eq('id', true).maybeSingle();
+      if (data) setHomePromo(data as HomePromo);
+    };
+    void loadHomePromo();
   }, []);
 
   useEffect(() => {
@@ -176,6 +186,12 @@ export default function BuyerHome() {
     else if (result.marketplaceCategory && result.vendorId) router.push({ pathname: '/(buyer)/marketplace/[vendorId]/[productId]', params: { vendorId: result.vendorId, productId: result.id } });
     else router.push({ pathname: '/(buyer)/supermarket/[category]', params: { category: (result.category ?? 'all-products').toLowerCase().replace(/\s*&\s*/g, '-').replace(/\s+/g, '-') } });
   };
+  const openHomePromo = () => {
+    const destination = homePromo?.cta_href?.trim();
+    if (!destination) return;
+    if (/^https?:\/\//i.test(destination)) { void Linking.openURL(destination); return; }
+    router.push(destination as never);
+  };
 
   return <View style={styles.screen}>
     <StatusBar style="light" />
@@ -190,7 +206,7 @@ export default function BuyerHome() {
       {isSupermarket ? <View><SupermarketStores vendors={supermarketVendors} width={supermarketVendorWidth} onPress={(vendorId) => router.push({ pathname: '/(buyer)/marketplace/[vendorId]', params: { vendorId } })} /><View style={styles.supermarketGrid}>{SUPERMARKET.map((item) => <TouchableOpacity key={item.label} style={styles.supermarketTileWrap} activeOpacity={0.88} onPress={() => router.push({ pathname: '/(buyer)/supermarket/[category]', params: { category: item.slug } })}><ImageBackground source={item.image} imageStyle={styles.tileImage} style={styles.supermarketTile}><View style={styles.tileShade} /><Text style={styles.tileLabel}>{item.label}</Text></ImageBackground></TouchableOpacity>)}</View> </View> : <View style={styles.body}>
         <View style={styles.status}><View style={styles.statusDot} /><Text style={styles.statusText}>Accepting orders</Text></View><Text style={styles.subheading}>From all your favourite vendors, with love.</Text>
         <FlatList horizontal data={CATEGORIES} showsHorizontalScrollIndicator={false} keyExtractor={(item) => item.label} contentContainerStyle={styles.categories} renderItem={({ item }) => { const active = item.label === activeCategory; return <Pressable onPress={() => { setActiveCategory(item.label); router.push({ pathname: '/(buyer)/marketplace/category/[category]', params: { category: item.label.toLowerCase().replace(' ', '-') } }); }} style={styles.categoryWrap}><View style={[styles.categoryIcon, active && styles.categoryIconActive]}><Image source={item.image} style={styles.categoryImage} /></View><Text style={[styles.categoryText, active && styles.categoryTextActive]}>{item.label}</Text></Pressable>; }} />
-        <ImageBackground source={PROMO_IMAGE} imageStyle={styles.promoImage} style={styles.promo}><View style={styles.promoOverlay} /><Text style={styles.promoEyebrow}>TODAY'S PICK</Text><Text style={styles.promoTitle}>Sholly's jollof is extra smoky today.</Text><TouchableOpacity style={styles.orderButton}><Text style={styles.orderButtonText}>ORDER NOW</Text></TouchableOpacity></ImageBackground>
+        <ImageBackground source={homePromo?.background_image_url ? { uri: homePromo.background_image_url } : PROMO_IMAGE} imageStyle={styles.promoImage} style={[styles.promo, { backgroundColor: homePromo?.background_color || COLORS.navy }]}><View style={styles.promoOverlay} /><Text style={styles.promoEyebrow}>{homePromo?.heading || "TODAY'S PICK"}</Text><Text style={styles.promoTitle}>{homePromo?.message || "Sholly's jollof is extra smoky today."}</Text><TouchableOpacity style={styles.orderButton} onPress={openHomePromo}><Text style={styles.orderButtonText}>{homePromo?.cta_label || 'ORDER NOW'}</Text></TouchableOpacity></ImageBackground>
         <SectionTitle title="Vendors open now" />
         <FlatList horizontal data={vendors} showsHorizontalScrollIndicator={false} keyExtractor={(item) => item.id} contentContainerStyle={styles.horizontalList} renderItem={({ item }) => <TouchableOpacity activeOpacity={0.85} style={[styles.vendorCard, { width: vendorCardWidth }]} onPress={() => router.push({ pathname: '/(buyer)/marketplace/[vendorId]', params: { vendorId: item.id } })}><ImageBackground source={item.banner_url ? { uri: item.banner_url } : PROMO_IMAGE} style={styles.vendorImage} imageStyle={styles.vendorImageFile}><View style={styles.open}><Text style={styles.openText}>{item.is_open === false ? 'CLOSED' : 'OPEN'}</Text></View></ImageBackground><View style={styles.vendorInfo}><Text numberOfLines={1} style={styles.vendorName}>{item.name}</Text><Text numberOfLines={1} style={styles.vendorCuisine}>{item.category ?? 'Marketplace'}</Text><Text style={styles.deliveryTime}>{item.average_prep_time ?? '30–60 mins'}</Text></View></TouchableOpacity>} />
         <SectionTitle title="Best sellers" /><FlatList horizontal data={PRODUCTS} showsHorizontalScrollIndicator={false} keyExtractor={(item) => item.id} contentContainerStyle={[styles.horizontalList, styles.products]} renderItem={({ item }) => <ProductCard item={item} width={cardWidth} quantity={quantities[item.id] ?? 0} change={(amount) => updateQuantity(item.id, amount)} addToCart={() => addProductToCart(item.id)} />} />
