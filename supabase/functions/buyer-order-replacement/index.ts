@@ -1,7 +1,7 @@
 import { admin, corsHeaders, getUser, json } from '../_shared/paystack.ts';
 
 type Alternative = { id: string; name: string; price: number; image_url?: string | null; category?: string | null };
-type RequestBody = { request_id?: string; action?: 'select' | 'cancel'; product_id?: string };
+type RequestBody = { request_id?: string; action?: 'select' | 'cancel'; product_ids?: string[] };
 
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -16,7 +16,7 @@ Deno.serve(async (request) => {
     const db = admin();
     const { data: replacement, error: replacementError } = await db
       .from('order_rejection_requests')
-      .select('id, order_id, vendor_id, status, alternative_products, orders!inner(id, user_id), vendors!inner(owner_id, name)')
+      .select('id, order_id, vendor_id, status, alternative_products, replacement_budget, orders!inner(id, user_id), vendors!inner(owner_id, name)')
       .eq('id', body.request_id)
       .maybeSingle();
     if (replacementError || !replacement) return json({ error: replacementError?.message ?? 'Replacement request not found.' }, 404);
@@ -38,23 +38,44 @@ Deno.serve(async (request) => {
     }
 
     const alternatives = Array.isArray(replacement.alternative_products) ? replacement.alternative_products as Alternative[] : [];
-    const selected = alternatives.find((product) => product.id === body.product_id);
-    if (!selected) return json({ error: 'Choose one of the suggested alternatives.' }, 400);
+    const selectedIds = [...new Set((body.product_ids ?? []).filter((id): id is string => typeof id === 'string'))];
+    const selected = alternatives.filter((product) => selectedIds.includes(product.id));
+    if (!selected.length || selected.length !== selectedIds.length) return json({ error: 'Choose one or more of the suggested alternatives.' }, 400);
+
+    let replacementBudget = Number(replacement.replacement_budget ?? 0);
+    if (replacementBudget <= 0) {
+      const { data: originalItems, error: originalItemsError } = await db
+        .from('order_items')
+        .select('total_price, products!inner(vendor_id)')
+        .eq('order_id', replacement.order_id)
+        .eq('products.vendor_id', replacement.vendor_id);
+      if (originalItemsError) throw new Error(originalItemsError.message);
+      replacementBudget = (originalItems ?? []).reduce((sum, item) => sum + Number(item.total_price ?? 0), 0);
+    }
+    const selectedSubtotal = selected.reduce((sum, product) => sum + Number(product.price ?? 0), 0);
+    if (selectedSubtotal > replacementBudget) {
+      return json({ error: `Your replacement selection is ₦${selectedSubtotal.toLocaleString('en-NG')}, which is above the ₦${replacementBudget.toLocaleString('en-NG')} original item value.` }, 400);
+    }
+    const refundAmount = Math.max(0, replacementBudget - selectedSubtotal);
+    const selectedNames = selected.map((product) => product.name).join(', ');
 
     const { error: requestError } = await db.from('order_rejection_requests').update({
-      status: 'replacement_selected', selected_product_id: selected.id, selected_product_name: selected.name, responded_at: respondedAt,
+      status: 'replacement_selected', selected_product_id: selected[0].id, selected_product_name: selectedNames,
+      selected_products: selected, selected_subtotal: selectedSubtotal, replacement_budget: replacementBudget, refund_amount: refundAmount,
+      responded_at: respondedAt,
     }).eq('id', replacement.id);
     if (requestError) throw new Error(requestError.message);
     const { error: orderError } = await db.from('orders').update({ status: 'replacement_selected' }).eq('id', replacement.order_id);
     if (orderError) throw new Error(orderError.message);
-    const message = `Customer selected ${selected.name} as a replacement. Please confirm the replacement with them before preparing the order.`;
+    const refundCopy = refundAmount > 0 ? ` AOM owes the customer a ₦${refundAmount.toLocaleString('en-NG')} refund.` : '';
+    const message = `Customer selected ${selectedNames} as a replacement (₦${selectedSubtotal.toLocaleString('en-NG')}). Please confirm the replacement before preparing the order.${refundCopy}`;
     const { error: updateError } = await db.from('order_updates').insert({ order_id: replacement.order_id, vendor_id: replacement.vendor_id, message, update_type: 'system' });
     if (updateError) throw new Error(updateError.message);
     const vendor = Array.isArray(replacement.vendors) ? replacement.vendors[0] : replacement.vendors;
     if (vendor?.owner_id) {
       const { error: notificationError } = await db.from('notifications').insert({
         user_id: vendor.owner_id,
-        title: `Customer chose ${selected.name}`,
+        title: `Customer chose replacement items`,
         body: message,
         message,
         kind: 'order',
@@ -64,7 +85,7 @@ Deno.serve(async (request) => {
       });
       if (notificationError) throw new Error(notificationError.message);
     }
-    return json({ status: 'replacement_selected', selected_product: selected });
+    return json({ status: 'replacement_selected', selected_products: selected, selected_subtotal: selectedSubtotal, replacement_budget: replacementBudget, refund_amount: refundAmount });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : 'Could not respond to the replacement request.' }, 400);
   }

@@ -9,7 +9,7 @@ type OrderRecord = { order_number: string; status: string; delivery_type: string
 type OrderUpdate = { id: string; message: string; update_type: 'system' | 'vendor'; created_at: string };
 type TrackingUpdate = OrderUpdate & { pending?: boolean };
 type ReplacementProduct = { id: string; name: string; price: number; image_url?: string | null; category?: string | null };
-type RejectionRequest = { id: string; reason: string; other_reason: string | null; alternative_products: ReplacementProduct[]; selected_product_name: string | null; status: 'pending_customer' | 'replacement_selected' | 'cancelled' };
+type RejectionRequest = { id: string; reason: string; other_reason: string | null; alternative_products: ReplacementProduct[]; selected_product_name: string | null; selected_products?: ReplacementProduct[]; replacement_budget?: number | null; selected_subtotal?: number | null; refund_amount?: number | null; status: 'pending_customer' | 'replacement_selected' | 'cancelled' | 'choosing' };
 
 const DELIVERY_STEPS = [
   ['pending', 'Order received and processing'], ['accepted', 'Vendor has accepted your order'], ['preparing', 'Your order is being prepared'], ['ready', 'Your order is packed and ready'], ['out_for_delivery', 'Order has been handed to the rider'], ['delivered', 'Order delivered successfully'],
@@ -24,6 +24,7 @@ export default function OrderDetailsPage() {
   const [order, setOrder] = useState<OrderRecord | null>(null);
   const [customUpdates, setCustomUpdates] = useState<OrderUpdate[]>([]);
   const [rejectionRequest, setRejectionRequest] = useState<RejectionRequest | null>(null);
+  const [selectedReplacementIds, setSelectedReplacementIds] = useState<string[]>([]);
   const [responding, setResponding] = useState(false);
   const [loading, setLoading] = useState(orderId !== 'preview');
   const isPickup = fulfilment === 'pickup' || order?.delivery_type === 'pickup';
@@ -35,11 +36,13 @@ export default function OrderDetailsPage() {
       const [{ data: orderData }, { data: updatesData }, { data: rejectionData }] = await Promise.all([
         supabase.from('orders').select('order_number, status, delivery_type, created_at').eq('id', orderId).single(),
         supabase.from('order_updates').select('id, message, update_type, created_at').eq('order_id', orderId).order('created_at', { ascending: false }).limit(3),
-        supabase.from('order_rejection_requests').select('id, reason, other_reason, alternative_products, selected_product_name, status').eq('order_id', orderId).maybeSingle(),
+        supabase.from('order_rejection_requests').select('id, reason, other_reason, alternative_products, selected_product_name, selected_products, replacement_budget, selected_subtotal, refund_amount, status').eq('order_id', orderId).maybeSingle(),
       ]);
       if (orderData) setOrder(orderData as OrderRecord);
       setCustomUpdates((updatesData ?? []) as OrderUpdate[]);
-      setRejectionRequest((rejectionData ?? null) as RejectionRequest | null);
+      const nextRequest = (rejectionData ?? null) as RejectionRequest | null;
+      setRejectionRequest(nextRequest?.status === 'pending_customer' ? { ...nextRequest, status: 'choosing' } : nextRequest);
+      if (nextRequest?.status === 'pending_customer') setSelectedReplacementIds([]);
       setLoading(false);
     };
     void loadOrder();
@@ -60,25 +63,29 @@ export default function OrderDetailsPage() {
 
   const orderNumber = order?.order_number ?? 'Preview';
   const finalStatus = order?.status === 'delivered';
-  const respondToReplacement = async (action: 'select' | 'cancel', productId?: string) => {
+  const respondToReplacement = async (action: 'select' | 'cancel', productIds?: string[] | string) => {
     if (!rejectionRequest) return;
+    const selectionIds = Array.isArray(productIds) ? productIds : productIds ? [productIds] : [];
     setResponding(true);
-    const { data, error } = await supabase.functions.invoke('buyer-order-replacement', { body: { request_id: rejectionRequest.id, action, product_id: productId } });
+    if (action === 'select' && !selectionIds.length) { setResponding(false); Alert.alert('Choose replacement items', 'Select at least one option before continuing.'); return; }
+    const { data, error } = await supabase.functions.invoke('buyer-order-replacement', { body: { request_id: rejectionRequest.id, action, product_ids: selectionIds } });
     setResponding(false);
     if (error || data?.error) { Alert.alert('Could not update order', data?.error ?? error?.message ?? 'Please try again.'); return; }
     if (action === 'select') {
-      const selected = rejectionRequest.alternative_products.find((product) => product.id === productId);
-      const message = `You selected ${selected?.name ?? 'a replacement'}. The vendor has been notified.`;
-      setRejectionRequest((current) => current ? { ...current, status: 'replacement_selected', selected_product_name: selected?.name ?? current.selected_product_name } : current);
+      const selected = rejectionRequest.alternative_products.filter((product) => selectionIds.includes(product.id));
+      const selectedNames = selected.map((product) => product.name).join(', ') || 'a replacement';
+      const refundAmount = Number(data?.refund_amount ?? 0);
+      const message = `You selected ${selectedNames}. The vendor has been notified.${refundAmount > 0 ? ` AOM will refund ₦${refundAmount.toLocaleString('en-NG')}.` : ''}`;
+      setRejectionRequest((current) => current ? { ...current, status: 'replacement_selected', selected_product_name: selectedNames, selected_products: selected, selected_subtotal: data?.selected_subtotal ?? null, refund_amount: refundAmount } : current);
       setOrder((current) => current ? { ...current, status: 'replacement_selected' } : current);
-      setCustomUpdates((current) => [{ id: `replacement-${Date.now()}`, message: `Customer selected ${selected?.name ?? 'a replacement'} as a replacement.`, update_type: 'system' as const, created_at: new Date().toISOString() }, ...current].slice(0, 3));
+      setCustomUpdates((current) => [{ id: `replacement-${Date.now()}`, message: `Customer selected ${selectedNames} as a replacement.${refundAmount > 0 ? ` Refund due: ₦${refundAmount.toLocaleString('en-NG')}.` : ''}`, update_type: 'system' as const, created_at: new Date().toISOString() }, ...current].slice(0, 3));
       Alert.alert('Replacement selected', message);
     } else {
       setRejectionRequest((current) => current ? { ...current, status: 'cancelled' } : current);
       setOrder((current) => current ? { ...current, status: 'cancelled' } : current);
       Alert.alert('Order cancelled', 'AOM will process your refund manually.');
     }
-    void (async () => { const { data: refreshed } = await supabase.from('order_rejection_requests').select('id, reason, other_reason, alternative_products, selected_product_name, status').eq('id', rejectionRequest.id).maybeSingle(); setRejectionRequest((refreshed ?? null) as RejectionRequest | null); })();
+    void (async () => { const { data: refreshed } = await supabase.from('order_rejection_requests').select('id, reason, other_reason, alternative_products, selected_product_name, selected_products, replacement_budget, selected_subtotal, refund_amount, status').eq('id', rejectionRequest.id).maybeSingle(); setRejectionRequest((refreshed ?? null) as RejectionRequest | null); })();
   };
   if (loading) return <View style={styles.loading}><ActivityIndicator size="large" color="#68ECCB" /></View>;
 
@@ -88,6 +95,7 @@ export default function OrderDetailsPage() {
       <View style={styles.steps}><View style={styles.step}><Ionicons name="checkmark" size={16} color="#FFFFFF" /></View><View style={styles.stepLine} /><View style={styles.step}><Ionicons name="checkmark" size={16} color="#FFFFFF" /></View><View style={styles.stepLine} /><View style={styles.step}><Ionicons name="checkmark" size={16} color="#FFFFFF" /></View><View style={styles.stepLine} /><View style={styles.step}><Ionicons name="checkmark" size={16} color="#FFFFFF" /></View></View>
       <View style={styles.orderBanner}><Text style={styles.orderLabel}>Order Number</Text><View style={styles.orderNo}><Text style={styles.orderNoText}>{orderNumber}</Text></View></View>
       <View style={styles.meta}><View><Text style={styles.metaLabel}>{isPickup ? 'Pickup time' : 'Delivery time'}</Text><Text style={styles.metaLabel}>{isPickup ? 'Pickup location' : 'Dropoff location'}</Text></View><View style={styles.metaRight}><Text style={styles.metaValue}>{isPickup ? 'Ready in ~15 mins' : 'Estimated shortly'}</Text><Text style={styles.metaValue}>{isPickup ? 'Vendor pickup point' : address || 'American University of Nigeria'}</Text></View></View>
+      {rejectionRequest?.status === 'choosing' ? <ReplacementChooser request={rejectionRequest} selectedIds={selectedReplacementIds} onToggle={(id) => setSelectedReplacementIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id])} onConfirm={() => void respondToReplacement('select', selectedReplacementIds)} onCancel={() => void respondToReplacement('cancel')} responding={responding} /> : null}
       {rejectionRequest?.status === 'pending_customer' ? <View style={styles.replacementCard}><View style={styles.replacementTop}><Ionicons name="swap-horizontal-outline" size={22} color="#9A6200" /><Text style={styles.replacementTitle}>Choose a replacement</Text></View><Text style={styles.replacementCopy}>{rejectionRequest.reason === 'out_of_stock' ? 'An item in your order is out of stock. Pick another available item from this vendor, or cancel the order.' : rejectionRequest.other_reason || 'The vendor cannot fulfil this order.'}</Text>{rejectionRequest.alternative_products.map((product) => <TouchableOpacity key={product.id} disabled={responding} onPress={() => void respondToReplacement('select', product.id)} style={styles.replacementOption}><View style={{ flex: 1 }}><Text style={styles.replacementName}>{product.name}</Text><Text style={styles.replacementPrice}>₦{Number(product.price).toLocaleString('en-NG')}</Text></View><Ionicons name="arrow-forward-circle" size={25} color="#176E73" /></TouchableOpacity>)}<TouchableOpacity disabled={responding} onPress={() => void respondToReplacement('cancel')} style={styles.cancelReplacement}>{responding ? <ActivityIndicator color="#9D4538" /> : <Text style={styles.cancelReplacementText}>No thanks — cancel and refund manually</Text>}</TouchableOpacity></View> : null}
       {rejectionRequest?.status === 'replacement_selected' ? <View style={styles.replacementSelected}><Ionicons name="checkmark-circle" size={21} color="#176E73" /><Text style={styles.replacementSelectedText}>You selected {rejectionRequest.selected_product_name ?? 'a replacement'}. The vendor has been notified.</Text></View> : null}
       {rejectionRequest?.status === 'cancelled' ? <View style={styles.replacementCancelled}><Ionicons name="information-circle" size={21} color="#9D4538" /><Text style={styles.replacementCancelledText}>This order was cancelled. AOM will process your refund manually.</Text></View> : null}
@@ -96,6 +104,36 @@ export default function OrderDetailsPage() {
     </ScrollView>
   </View></View>;
 }
+
+function ReplacementChooser({ request, selectedIds, onToggle, onConfirm, onCancel, responding }: { request: RejectionRequest; selectedIds: string[]; onToggle: (id: string) => void; onConfirm: () => void; onCancel: () => void; responding: boolean }) {
+  const selected = request.alternative_products.filter((product) => selectedIds.includes(product.id));
+  const subtotal = selected.reduce((sum, product) => sum + Number(product.price), 0);
+  const budget = Number(request.replacement_budget ?? 0);
+  const overBudget = budget > 0 && subtotal > budget;
+  const refund = Math.max(0, budget - subtotal);
+  return <View style={styles.replacementCard}>
+    <View style={styles.replacementTop}><Ionicons name="swap-horizontal-outline" size={22} color="#9A6200" /><Text style={styles.replacementTitle}>Choose replacement items</Text></View>
+    <Text style={styles.replacementCopy}>{request.reason === 'out_of_stock' ? 'Select one or more suggested items. Their combined value must stay within your original item value.' : request.other_reason || 'Select one or more suggested items from this vendor.'}</Text>
+    {budget > 0 ? <View style={replacementStyles.summary}><Text style={replacementStyles.summaryLabel}>Replacement budget</Text><Text style={replacementStyles.summaryValue}>₦{budget.toLocaleString('en-NG')}</Text><Text style={replacementStyles.summaryLabel}>Selected</Text><Text style={[replacementStyles.summaryValue, overBudget && replacementStyles.summaryOver]}>₦{subtotal.toLocaleString('en-NG')}</Text>{!overBudget && subtotal > 0 ? <Text style={replacementStyles.refund}>AOM refund: ₦{refund.toLocaleString('en-NG')}</Text> : null}</View> : null}
+    {request.alternative_products.map((product) => { const chosen = selectedIds.includes(product.id); return <TouchableOpacity key={product.id} disabled={responding} onPress={() => onToggle(product.id)} style={[styles.replacementOption, chosen && replacementStyles.optionChosen]}><View style={{ flex: 1 }}><Text style={styles.replacementName}>{product.name}</Text><Text style={styles.replacementPrice}>₦{Number(product.price).toLocaleString('en-NG')}</Text></View><Ionicons name={chosen ? 'checkmark-circle' : 'add-circle-outline'} size={25} color={chosen ? '#176E73' : '#7B8794'} /></TouchableOpacity>; })}
+    {overBudget ? <Text style={replacementStyles.overBudget}>Remove an item to stay within the original item value.</Text> : null}
+    <TouchableOpacity disabled={responding || !selected.length || overBudget} onPress={onConfirm} style={[replacementStyles.confirm, (!selected.length || overBudget) && replacementStyles.confirmDisabled]}>{responding ? <ActivityIndicator color="#FFFFFF" /> : <Text style={replacementStyles.confirmText}>Confirm selected items</Text>}</TouchableOpacity>
+    <TouchableOpacity disabled={responding} onPress={onCancel} style={styles.cancelReplacement}><Text style={styles.cancelReplacementText}>No thanks — cancel and refund manually</Text></TouchableOpacity>
+  </View>;
+}
+
+const replacementStyles = StyleSheet.create({
+  summary: { marginTop: 7, padding: 10, borderRadius: 10, backgroundColor: '#F2EEE6', flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' },
+  summaryLabel: { color: '#735F3E', fontSize: 12, fontWeight: '700' },
+  summaryValue: { color: '#01193D', fontSize: 13, fontWeight: '800', marginRight: 8 },
+  summaryOver: { color: '#9D4538' },
+  refund: { width: '100%', color: '#176E73', fontSize: 12, fontWeight: '800', marginTop: 2 },
+  optionChosen: { borderColor: '#176E73', backgroundColor: '#E1F6F0' },
+  overBudget: { color: '#9D4538', fontSize: 12, fontWeight: '700', marginTop: 9 },
+  confirm: { minHeight: 47, marginTop: 13, borderRadius: 9, backgroundColor: '#01193D', alignItems: 'center', justifyContent: 'center' },
+  confirmDisabled: { backgroundColor: '#A9B3C0' },
+  confirmText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
+});
 
 const legacyStyles = StyleSheet.create({
   heroOriginal: { height: 150, paddingTop: 40, borderBottomLeftRadius: 30, borderBottomRightRadius: 30 },
