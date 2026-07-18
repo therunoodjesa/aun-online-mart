@@ -73,7 +73,7 @@ export default function SupermarketProductPage() {
     for (let item = 0; item < quantity; item += 1) {
       addItem({ productId: `${product.id}:${selectedOption?.id ?? 'default'}:${note.trim() || 'no-note'}`, name: `${product.name}${variant}`, category: product.category, price: unitPrice, imageUrl: product.image_url });
     }
-    setCartToast(`${product.name} added to cart`);
+    setCartToast('added');
   };
   const openRecommendation = (item: Product) => router.push({ pathname: '/(buyer)/supermarket/[category]/[productId]', params: { category: category || 'all-products', productId: item.id } });
 

@@ -12,7 +12,7 @@ export function CartToast({ visible, message, onDismiss }: CartToastProps) {
   }, [onDismiss, visible]);
 
   if (!visible) return null;
-  return <View pointerEvents="none" style={styles.wrap}><View style={styles.toast}><View style={styles.icon}><Ionicons name="checkmark" size={17} color="#01193D" /></View><Text numberOfLines={1} style={styles.text}>{message || 'Added to cart'}</Text><Ionicons name="cart-outline" size={19} color="#F8F3ED" /></View></View>;
+  return <View pointerEvents="none" style={styles.wrap}><View style={styles.toast}><View style={styles.icon}><Ionicons name="checkmark" size={17} color="#01193D" /></View><Text numberOfLines={1} style={styles.text}>Added to cart</Text><Ionicons name="cart-outline" size={19} color="#F8F3ED" /></View></View>;
 }
 
 const styles = StyleSheet.create({

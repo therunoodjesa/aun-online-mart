@@ -84,10 +84,15 @@ export default function MarketplaceProductPage() {
     for (let count = 0; count < quantity; count += 1) {
       addItem({ productId: `${product.id}:${selectionKey}:${note.trim() || 'no-note'}`, name: `${product.name} · ${selection}`, category: vendorName, price: unitPrice, imageUrl: product.image_url });
     }
-    setCartToast(`${product.name} added to cart`);
+    setCartToast('added');
   };
   const openRelated = (item: Product) => router.push({ pathname: '/(buyer)/marketplace/[vendorId]/[productId]', params: { vendorId: item.vendor_id, productId: item.id } });
-  const addRelated = (item: Product) => { addItem({ productId: item.id, name: item.name, category: vendorName, price: item.price, imageUrl: item.image_url }); setCartToast(`${item.name} added to cart`); };
+  const addRelated = async (item: Product) => {
+    const { data } = await supabase.from('product_options').select('id').eq('product_id', item.id).eq('is_available', true).limit(1);
+    if (data?.length) { openRelated(item); return; }
+    addItem({ productId: item.id, name: item.name, category: vendorName, price: item.price, imageUrl: item.image_url });
+    setCartToast('added');
+  };
 
   if (loading) return <View style={styles.loading}><ActivityIndicator size="large" color="#68ECCB" /></View>;
   if (!product) return <View style={styles.loading}><Text style={styles.notFound}>This item is unavailable.</Text><TouchableOpacity onPress={goBack}><Text style={styles.return}>Return to marketplace</Text></TouchableOpacity></View>;
@@ -111,7 +116,7 @@ export default function MarketplaceProductPage() {
 
         <Text style={styles.sectionLabel}>SPECIAL INSTRUCTIONS</Text>
         <View style={styles.noteBox}><Ionicons name="pencil" size={17} color="#7E7E7E" /><TextInput value={note} onChangeText={setNote} placeholder="Write any special request for the vendor" placeholderTextColor="#7E7E7E" style={[styles.noteInput, { paddingVertical: 0, textAlignVertical: 'center', includeFontPadding: false }]} /></View>
-        {related.length > 0 && <View style={styles.relatedSection}><Text style={styles.relatedTitle}>Customers also liked</Text><View style={styles.relatedGrid}>{related.map((item) => <View key={item.id} style={styles.relatedCard}><TouchableOpacity onPress={() => openRelated(item)}><Image source={item.image_url ? { uri: item.image_url } : undefined} style={styles.relatedImage} /><Text numberOfLines={1} style={styles.relatedName}>{item.name}</Text></TouchableOpacity><View style={styles.relatedFooter}><Text style={styles.relatedPrice}>{price(item.price)}</Text><TouchableOpacity onPress={() => addRelated(item)} style={styles.relatedCart} accessibilityLabel={`Add ${item.name} to cart`}><Ionicons name="cart" size={17} color="#F8F3ED" /></TouchableOpacity></View></View>)}</View></View>}
+        {related.length > 0 && <View style={styles.relatedSection}><Text style={styles.relatedTitle}>Customers also liked</Text><View style={styles.relatedGrid}>{related.map((item) => <View key={item.id} style={styles.relatedCard}><TouchableOpacity onPress={() => openRelated(item)}><Image source={item.image_url ? { uri: item.image_url } : undefined} style={styles.relatedImage} /><Text numberOfLines={1} style={styles.relatedName}>{item.name}</Text></TouchableOpacity><View style={styles.relatedFooter}><Text style={styles.relatedPrice}>{price(item.price)}</Text><TouchableOpacity onPress={() => void addRelated(item)} style={styles.relatedCart} accessibilityLabel={`Add ${item.name} to cart`}><Ionicons name="cart" size={17} color="#F8F3ED" /></TouchableOpacity></View></View>)}</View></View>}
       </View>
     </ScrollView>
     <CartToast visible={Boolean(cartToast)} message={cartToast} onDismiss={() => setCartToast('')} />

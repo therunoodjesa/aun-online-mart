@@ -130,10 +130,17 @@ export default function SupermarketCategoryPage() {
   }, [products, query]);
 
   const quantity = (productId: string) => items.find((item) => item.productId === productId)?.quantity ?? 0;
+  const openProduct = (product: Product) => router.push({ pathname: '/(buyer)/supermarket/[category]/[productId]', params: { category: key, productId: product.id } });
   const updateQuantity = (product: Product, amount: number) => {
     if (product.status !== 'available') return;
-    if (amount > 0) { addItem({ productId: product.id, name: product.name, category: product.category, price: product.price, imageUrl: product.image_url }); setCartToast(`${product.name} added to cart`); }
+    if (amount > 0) { addItem({ productId: product.id, name: product.name, category: product.category, price: product.price, imageUrl: product.image_url }); setCartToast('added'); }
     else changeQuantity(product.id, -1);
+  };
+  const addOrCustomise = async (product: Product) => {
+    if (product.status !== 'available') return;
+    const { data } = await supabase.from('product_options').select('id').eq('product_id', product.id).eq('is_available', true).limit(1);
+    if (data?.length) { openProduct(product); return; }
+    updateQuantity(product, 1);
   };
   const openSearchResult = (result: SearchResult) => {
     setQuery(''); setSearchResults([]);
@@ -170,7 +177,7 @@ export default function SupermarketCategoryPage() {
           </View>
           <Text style={styles.welcome}>Welcome to the AUN Online Mart supermarket! In this section, there are hundreds of products across baking ingredients, skincare, fragrances, groceries, etc. This feature saves you the trip to physical markets and shops, allowing you more leisure time. A service fee would be applied at checkout, according to your order weight and total time required for procurement and delivery.</Text>
         </>}
-        renderItem={({ item }) => <TouchableOpacity activeOpacity={0.9} onPress={() => router.push({ pathname: '/(buyer)/supermarket/[category]/[productId]', params: { category: key, productId: item.id } })} style={[styles.card, { width: cardWidth }]}><View style={styles.photoWrap}>{item.image_url ? <Image source={{ uri: item.image_url }} style={styles.photo} /> : <View style={styles.photoPlaceholder}><Ionicons name="image-outline" size={30} color={COLORS.muted} /></View>}</View><View style={styles.cardInfo}><View style={styles.nameRow}><Text numberOfLines={2} style={styles.productName}>{item.name}</Text>{item.status === 'available' ? <TouchableOpacity onPress={() => updateQuantity(item, 1)} hitSlop={8} accessibilityLabel={'Add ' + item.name + ' to cart'}><Ionicons name="cart-outline" size={21} color={COLORS.cream} /></TouchableOpacity> : <Text style={styles.soldOutLabel}>Sold out</Text>}</View><View style={styles.purchaseRow}>{item.status === 'available' ? <View style={styles.stepper}><TouchableOpacity onPress={() => updateQuantity(item, -1)} style={styles.stepButton}><Text style={styles.stepText}>-</Text></TouchableOpacity><Text style={styles.quantity}>{quantity(item.id)}</Text><TouchableOpacity onPress={() => updateQuantity(item, 1)} style={styles.stepButton}><Text style={styles.stepText}>+</Text></TouchableOpacity></View> : <Text style={styles.outOfStock}>Out of stock</Text>}<Text style={styles.price}>{money(item.price)}</Text></View></View></TouchableOpacity>}
+        renderItem={({ item }) => <TouchableOpacity activeOpacity={0.9} onPress={() => openProduct(item)} style={[styles.card, { width: cardWidth }]}><View style={styles.photoWrap}>{item.image_url ? <Image source={{ uri: item.image_url }} style={styles.photo} /> : <View style={styles.photoPlaceholder}><Ionicons name="image-outline" size={30} color={COLORS.muted} /></View>}</View><View style={styles.cardInfo}><View style={styles.nameRow}><Text numberOfLines={2} style={styles.productName}>{item.name}</Text>{item.status === 'available' ? <TouchableOpacity onPress={() => void addOrCustomise(item)} hitSlop={8} accessibilityLabel={'Add ' + item.name + ' to cart'}><Ionicons name="cart-outline" size={21} color={COLORS.cream} /></TouchableOpacity> : <Text style={styles.soldOutLabel}>Sold out</Text>}</View><View style={styles.purchaseRow}>{item.status === 'available' ? <View style={styles.stepper}><TouchableOpacity onPress={() => updateQuantity(item, -1)} style={styles.stepButton}><Text style={styles.stepText}>-</Text></TouchableOpacity><Text style={styles.quantity}>{quantity(item.id)}</Text><TouchableOpacity onPress={() => void addOrCustomise(item)} style={styles.stepButton}><Text style={styles.stepText}>+</Text></TouchableOpacity></View> : <Text style={styles.outOfStock}>Out of stock</Text>}<Text style={styles.price}>{money(item.price)}</Text></View></View></TouchableOpacity>}
         ListEmptyComponent={loading ? <ActivityIndicator style={styles.loading} size="large" color={COLORS.mint} /> : <View style={styles.empty}><Ionicons name="basket-outline" size={34} color={COLORS.muted} /><Text style={styles.emptyText}>No {config.title.toLowerCase()} available yet.</Text></View>}
       />
       <CartToast visible={Boolean(cartToast)} message={cartToast} onDismiss={() => setCartToast('')} />

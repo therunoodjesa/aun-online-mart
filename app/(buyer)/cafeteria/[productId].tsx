@@ -7,6 +7,7 @@ import { supabase } from '../../../lib/supabase';
 import { useCartStore } from '../../../store/cartstore';
 import { FavouriteButton } from '../../../components/FavouriteButton';
 import { isFavourited } from '../../../lib/favourites';
+import { CartToast } from '../../../components/CartToast';
 
 const CAFETERIA_FALLBACK = require('../../../assets/images/home/jollof-promo.png');
 type Product = { id: string; name: string; description: string | null; category: string; price: number; image_url: string | null; status: 'available' | 'sold_out' | 'hidden'; meal_plan_eligible: boolean };
@@ -26,6 +27,7 @@ export default function CafeteriaProductPage() {
   const [loading, setLoading] = useState(true);
   const [heroImageFailed, setHeroImageFailed] = useState(false);
   const [favourite, setFavourite] = useState(false);
+  const [cartToast, setCartToast] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -53,6 +55,7 @@ export default function CafeteriaProductPage() {
     const choices = selectedOptions.map((option) => option.name).join(' · ') || 'No extras';
     const key = `${product.id}:${selectedOptions.map((option) => option.id).join(':') || 'none'}:${note.trim() || 'no-note'}`;
     for (let index = 0; index < quantity; index += 1) addItem({ productId: `cafeteria:${key}`, name: `${product.name} · ${choices}`, category: `Cafeteria · ${product.category}`, price: unitPrice, imageUrl: product.image_url, mealPlanEligible: product.meal_plan_eligible });
+    setCartToast('added');
   };
   const openRelated = (item: Product) => router.push({ pathname: '/(buyer)/cafeteria/[productId]', params: { productId: item.id } });
 
@@ -68,6 +71,7 @@ export default function CafeteriaProductPage() {
         {related.length > 0 && <View style={styles.relatedSection}><Text style={styles.relatedTitle}>Customers also liked</Text><View style={styles.relatedGrid}>{related.map((item) => <View key={item.id} style={styles.relatedCard}><TouchableOpacity onPress={() => openRelated(item)}><Image source={item.image_url ? { uri: item.image_url } : CAFETERIA_FALLBACK} style={styles.relatedImage} /><Text numberOfLines={1} style={styles.relatedName}>{item.name}</Text></TouchableOpacity><View style={styles.relatedFooter}><Text style={styles.relatedPrice}>{price(item.price)}</Text><TouchableOpacity onPress={() => openRelated(item)} style={styles.relatedCart} accessibilityLabel={`Add ${item.name} to cart`}><Ionicons name="cart" size={17} color="#F8F3ED" /></TouchableOpacity></View></View>)}</View></View>}
       </View>
     </ScrollView>
+    <CartToast visible={Boolean(cartToast)} message={cartToast} onDismiss={() => setCartToast('')} />
     <View style={styles.bottomBar}><View style={styles.quantity}><TouchableOpacity style={styles.quantityButton} onPress={() => setQuantity((value) => Math.max(1, value - 1))}><Ionicons name="remove" size={17} color="#68ECCB" /></TouchableOpacity><Text style={styles.quantityText}>{quantity}</Text><TouchableOpacity style={styles.quantityButton} onPress={() => setQuantity((value) => value + 1)}><Ionicons name="add" size={17} color="#68ECCB" /></TouchableOpacity></View><TouchableOpacity style={styles.addButton} onPress={addToCart} disabled={product.status !== 'available'}><Ionicons name="cart" size={20} color="#F8F3ED" /><Text style={styles.addText}>{product.status === 'available' ? `Add to cart · ${price(total)}` : 'Sold out'}</Text></TouchableOpacity></View>
   </View>;
 }

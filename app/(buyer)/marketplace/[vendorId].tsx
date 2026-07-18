@@ -129,17 +129,21 @@ export default function VendorPage() {
     }));
     if (delta > 0 && product) {
       addItem({ productId: product.id, name: product.name, category: product.category, price: product.price, imageUrl: product.image_url });
-      setCartToast(`${product.name} added to cart`);
+      setCartToast('added');
     } else if (delta < 0) {
       changeQuantity(id, delta);
     }
   };
 
-  const addToCart = (id: string) => {
+  const addOrCustomise = async (id: string) => {
     const product = vendor?.products.find((item) => item.id === id);
     if (!product || product.status !== 'available') return;
-    addItem({ productId: product.id, name: product.name, category: product.category, price: product.price, imageUrl: product.image_url });
-    setCartToast(`${product.name} added to cart`);
+    const { data } = await supabase.from('product_options').select('id').eq('product_id', product.id).eq('is_available', true).limit(1);
+    if (data?.length) {
+      router.push({ pathname: '/(buyer)/marketplace/[vendorId]/[productId]', params: { vendorId, productId: product.id } });
+      return;
+    }
+    updateQty(product.id, 1);
   };
 
   const cartCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
@@ -329,7 +333,7 @@ export default function VendorPage() {
                           {product.name}
                         </Text>
                         <TouchableOpacity
-                          onPress={() => addToCart(product.id)}
+                          onPress={() => void addOrCustomise(product.id)}
                           disabled={product.status === 'sold_out'}
                         >
                           <Ionicons name="cart-outline" size={20 * S} color="#F8F3ED" />
@@ -348,7 +352,7 @@ export default function VendorPage() {
                           </Text>
                           <TouchableOpacity
                             style={styles.qtyBtn}
-                            onPress={() => updateQty(product.id, 1)}
+                            onPress={() => void addOrCustomise(product.id)}
                           >
                             <Ionicons name="add-outline" size={14 * S} color="#01193D" />
                           </TouchableOpacity>
