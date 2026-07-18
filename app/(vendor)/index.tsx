@@ -63,7 +63,7 @@ export default function VendorPortal() {
   useEffect(() => { void load(); }, []);
   useEffect(() => {
     let active = true;
-    const refreshOrderNotice = async () => { const orders = await loadVendorOrders(); if (active) setNewOrderCount(orders.filter((order) => order.status === 'pending').length); };
+    const refreshOrderNotice = async () => { const orders = await loadVendorOrders(); if (active) setNewOrderCount(orders.filter((order) => order.status === 'pending' || order.status === 'replacement_selected').length); };
     void refreshOrderNotice();
     const timer = setInterval(() => { void refreshOrderNotice(); }, 20000);
     return () => { active = false; clearInterval(timer); };
@@ -189,7 +189,7 @@ function Button({ icon, label, onPress }: { icon: keyof typeof Ionicons.glyphMap
 function Quick({ icon, label, onPress }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void }) { return <TouchableOpacity onPress={onPress} style={styles.quick}><Ionicons name={icon} size={28} color="#176E73" /><View><Text style={styles.quickTitle}>{label}</Text><Text style={styles.quickSub}>Manage availability instantly</Text></View></TouchableOpacity>; }
 function Empty() { return <View style={styles.center}><Ionicons name="storefront-outline" size={45} color="#176E73" /><Text style={styles.emptyTitle}>Your store is being set up</Text><Text style={styles.emptyCopy}>Ask the AOM team to link your vendor account before you manage your catalogue.</Text></View>; }
 
-type VendorOrder = { id: string; order_number: string; status: string; delivery_type: string | null; created_at: string; items: { product_name: string; quantity: number; unit_price: number }[] };
+type VendorOrder = { id: string; order_number: string; status: string; delivery_type: string | null; created_at: string; items: { product_name: string; quantity: number; unit_price: number }[]; replacement?: { status: string; selected_product_name: string | null } };
 type RejectionReason = 'out_of_stock' | 'store_closed' | 'cannot_meet_request' | 'preparation_time' | 'other';
 type ReplacementProduct = { id: string; name: string; price: number; category: string | null; image_url: string | null };
 type PayoutRequest = { id: string; amount: number; order_ids: string[]; status: 'requested' | 'processing' | 'paid' | 'rejected'; requested_at: string; processed_at: string | null; reference: string | null };
@@ -198,8 +198,12 @@ async function loadVendorOrders(): Promise<VendorOrder[]> {
   const { data: lines } = await supabase.from('order_items').select('order_id, product_name, quantity, unit_price');
   const ids = [...new Set((lines ?? []).map((line) => line.order_id))];
   if (!ids.length) return [];
-  const { data: orders } = await supabase.from('orders').select('id, order_number, status, delivery_type, created_at').in('id', ids).eq('payment_status', 'paid').order('created_at', { ascending: false });
-  return (orders ?? []).map((order) => ({ ...order, items: (lines ?? []).filter((line) => line.order_id === order.id) })) as VendorOrder[];
+  const [{ data: orders }, { data: replacements }] = await Promise.all([
+    supabase.from('orders').select('id, order_number, status, delivery_type, created_at').in('id', ids).eq('payment_status', 'paid').order('created_at', { ascending: false }),
+    supabase.from('order_rejection_requests').select('order_id, status, selected_product_name').in('order_id', ids),
+  ]);
+  const replacementsByOrder = new Map((replacements ?? []).map((request) => [request.order_id, { status: request.status, selected_product_name: request.selected_product_name }]));
+  return (orders ?? []).map((order) => ({ ...order, items: (lines ?? []).filter((line) => line.order_id === order.id), replacement: replacementsByOrder.get(order.id) })) as VendorOrder[];
 }
 
 function Dashboard({ vendor, products, onOrders }: { vendor: Vendor; products: Product[]; onOrders: () => void }) {
@@ -219,8 +223,23 @@ function Orders({ vendor }: { vendor: Vendor }) {
   const [alternatives, setAlternatives] = useState<ReplacementProduct[]>([]);
   const [selectedAlternativeIds, setSelectedAlternativeIds] = useState<string[]>([]);
   const [submittingRejection, setSubmittingRejection] = useState(false);
+  const [actionNotice, setActionNotice] = useState('');
   const load = async () => { setLoading(true); setOrders(await loadVendorOrders()); setLoading(false); };
   useEffect(() => { void load(); }, [vendor.id]);
+  useEffect(() => {
+    const refresh = () => { void load(); };
+    const channel = supabase.channel(`vendor-replacement-orders-${vendor.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_rejection_requests', filter: `vendor_id=eq.${vendor.id}` }, refresh)
+      .subscribe();
+    const timer = setInterval(refresh, 8000);
+    return () => { clearInterval(timer); void supabase.removeChannel(channel); };
+  }, [vendor.id]);
+  useEffect(() => {
+    if (!actionNotice) return;
+    Alert.alert('Replacement options sent', actionNotice);
+    setActionNotice('');
+  }, [actionNotice]);
   const advance = async (order: VendorOrder, status: 'accepted' | 'preparing' | 'ready') => {
     const { data, error } = await supabase.functions.invoke('vendor-order-update', { body: { order_id: order.id, status } });
     if (error || data?.error) Alert.alert('Could not update order', data?.error ?? error?.message ?? 'Please try again.');
@@ -243,7 +262,7 @@ function Orders({ vendor }: { vendor: Vendor }) {
     setSubmittingRejection(false);
     if (error || data?.error) { Alert.alert('Could not reject order', data?.error ?? error?.message ?? 'Please try again.'); return; }
     const sentReplacementOptions = Number(data.alternatives ?? 0) > 0;
-    Alert.alert(sentReplacementOptions ? 'Options sent to customer' : 'Order cancelled', sentReplacementOptions ? 'The customer can now choose a replacement from your menu.' : 'The customer will be told that AOM will process their refund manually.');
+    setActionNotice(sentReplacementOptions ? 'Replacement options sent. The customer has been notified and this order will update here when they choose.' : 'Order cancelled. The customer has been told that AOM will process their refund manually.');
     setRejectionOrder(null); void load();
   };
   const rejectionReasons: { id: RejectionReason; label: string; note: string }[] = [
@@ -258,7 +277,7 @@ function Orders({ vendor }: { vendor: Vendor }) {
 
 function Metric({ label, value }: { label: string; value: string }) { return <View style={styles.metric}><Text style={styles.metricValue}>{value}</Text><Text style={styles.metricLabel}>{label}</Text></View>; }
 function OrderPreview({ order }: { order: VendorOrder }) { return <View style={styles.preview}><View><Text style={styles.orderNumber}>#{order.order_number}</Text><Text style={styles.orderMeta}>{order.items.map((line) => `${line.quantity}× ${line.product_name}`).join(', ')}</Text></View><OrderStatus status={order.status} /></View>; }
-function OrderStatus({ status }: { status: string }) { return <View style={[styles.orderStatus, status === 'pending' && styles.pendingStatus]}><Text style={styles.orderStatusText}>{status.replaceAll('_', ' ')}</Text></View>; }
+function OrderStatus({ status, replacementName }: { status: string; replacementName?: string | null }) { const label = status === 'replacement_selected' ? `customer chose ${replacementName ?? 'replacement'}` : status.replaceAll('_', ' '); return <View style={[styles.orderStatus, status === 'pending' && styles.pendingStatus]}><Text style={styles.orderStatusText}>{label}</Text></View>; }
 function Action({ label, onPress, secondary }: { label: string; onPress: () => void; secondary?: boolean }) { return <TouchableOpacity onPress={onPress} style={[styles.action, secondary && styles.actionSecondary]}><Text style={[styles.actionText, secondary && styles.actionTextSecondary]}>{label}</Text></TouchableOpacity>; }
 function EmptyOrders() { return <View style={styles.emptyOrders}><Ionicons name="receipt-outline" size={34} color="#176E73" /><Text style={styles.emptyOrdersTitle}>No orders yet</Text><Text style={styles.emptyOrdersCopy}>New Sholly’s orders will appear here.</Text></View>; }
 

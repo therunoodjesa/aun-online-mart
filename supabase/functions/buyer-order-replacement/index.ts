@@ -16,7 +16,7 @@ Deno.serve(async (request) => {
     const db = admin();
     const { data: replacement, error: replacementError } = await db
       .from('order_rejection_requests')
-      .select('id, order_id, vendor_id, status, alternative_products, orders!inner(id, user_id)')
+      .select('id, order_id, vendor_id, status, alternative_products, orders!inner(id, user_id), vendors!inner(owner_id, name)')
       .eq('id', body.request_id)
       .maybeSingle();
     if (replacementError || !replacement) return json({ error: replacementError?.message ?? 'Replacement request not found.' }, 404);
@@ -50,6 +50,20 @@ Deno.serve(async (request) => {
     const message = `Customer selected ${selected.name} as a replacement. Please confirm the replacement with them before preparing the order.`;
     const { error: updateError } = await db.from('order_updates').insert({ order_id: replacement.order_id, vendor_id: replacement.vendor_id, message, update_type: 'system' });
     if (updateError) throw new Error(updateError.message);
+    const vendor = Array.isArray(replacement.vendors) ? replacement.vendors[0] : replacement.vendors;
+    if (vendor?.owner_id) {
+      const { error: notificationError } = await db.from('notifications').insert({
+        user_id: vendor.owner_id,
+        title: `Customer chose ${selected.name}`,
+        body: message,
+        message,
+        kind: 'order',
+        action_label: 'VIEW ORDER',
+        action_href: '/vendor-portal',
+        is_read: false,
+      });
+      if (notificationError) throw new Error(notificationError.message);
+    }
     return json({ status: 'replacement_selected', selected_product: selected });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : 'Could not respond to the replacement request.' }, 400);

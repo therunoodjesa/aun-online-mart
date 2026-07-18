@@ -66,7 +66,18 @@ export default function OrderDetailsPage() {
     const { data, error } = await supabase.functions.invoke('buyer-order-replacement', { body: { request_id: rejectionRequest.id, action, product_id: productId } });
     setResponding(false);
     if (error || data?.error) { Alert.alert('Could not update order', data?.error ?? error?.message ?? 'Please try again.'); return; }
-    Alert.alert(action === 'select' ? 'Replacement selected' : 'Order cancelled', action === 'select' ? 'The vendor has been notified of your choice.' : 'AOM will process your refund manually.');
+    if (action === 'select') {
+      const selected = rejectionRequest.alternative_products.find((product) => product.id === productId);
+      const message = `You selected ${selected?.name ?? 'a replacement'}. The vendor has been notified.`;
+      setRejectionRequest((current) => current ? { ...current, status: 'replacement_selected', selected_product_name: selected?.name ?? current.selected_product_name } : current);
+      setOrder((current) => current ? { ...current, status: 'replacement_selected' } : current);
+      setCustomUpdates((current) => [{ id: `replacement-${Date.now()}`, message: `Customer selected ${selected?.name ?? 'a replacement'} as a replacement.`, update_type: 'system' as const, created_at: new Date().toISOString() }, ...current].slice(0, 3));
+      Alert.alert('Replacement selected', message);
+    } else {
+      setRejectionRequest((current) => current ? { ...current, status: 'cancelled' } : current);
+      setOrder((current) => current ? { ...current, status: 'cancelled' } : current);
+      Alert.alert('Order cancelled', 'AOM will process your refund manually.');
+    }
     void (async () => { const { data: refreshed } = await supabase.from('order_rejection_requests').select('id, reason, other_reason, alternative_products, selected_product_name, status').eq('id', rejectionRequest.id).maybeSingle(); setRejectionRequest((refreshed ?? null) as RejectionRequest | null); })();
   };
   if (loading) return <View style={styles.loading}><ActivityIndicator size="large" color="#68ECCB" /></View>;
