@@ -5,7 +5,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { useCartStore } from '../../store/cartstore';
-import { CartToast } from '../../components/CartToast';
 
 const COLORS = { navy: '#01193D', cream: '#F8F3ED', mint: '#68ECCB', green: '#006D50', pale: '#E2F4EE', muted: '#A0A0A0' } as const;
 type Category = 'snacks' | 'lunch' | 'dinner';
@@ -26,7 +25,6 @@ export default function CafeteriaPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
-  const [cartToast, setCartToast] = useState('');
   const { items, addItem, changeQuantity } = useCartStore();
   const cardWidth = (width - 30) / 2;
   const currentTab = TABS.find((tab) => tab.id === category) ?? TABS[0];
@@ -51,11 +49,18 @@ export default function CafeteriaPage() {
     return term ? products.filter((item) => `${item.name} ${item.description ?? ''}`.toLowerCase().includes(term)) : products;
   }, [products, query]);
   const quantity = (id: string) => items.find((item) => item.productId === `cafeteria:${id}`)?.quantity ?? 0;
+  const openProduct = (item: Product) => router.push({ pathname: '/(buyer)/cafeteria/[productId]', params: { productId: item.id } });
   const update = (item: Product, amount: number) => {
     if (item.status === 'sold_out') return;
     const productId = `cafeteria:${item.id}`;
-    if (amount > 0) { addItem({ productId, name: item.name, category: `Cafeteria · ${item.category}`, price: item.price, imageUrl: item.image_url, mealPlanEligible: item.meal_plan_eligible }); setCartToast(`${item.name} added to cart`); }
+    if (amount > 0) addItem({ productId, name: item.name, category: `Cafeteria · ${item.category}`, price: item.price, imageUrl: item.image_url, mealPlanEligible: item.meal_plan_eligible });
     else changeQuantity(productId, -1);
+  };
+  const addOrCustomise = async (item: Product) => {
+    if (item.status === 'sold_out') return;
+    const { data } = await supabase.from('cafeteria_product_options').select('id').eq('product_id', item.id).eq('is_available', true).limit(1);
+    if (data?.length) { openProduct(item); return; }
+    update(item, 1);
   };
   const cafeteriaItems = items.filter((item) => item.productId.startsWith('cafeteria:'));
   const total = cafeteriaItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -75,10 +80,9 @@ export default function CafeteriaPage() {
         <View style={styles.tabs}>{TABS.map((tab) => <TouchableOpacity key={tab.id} style={styles.tab} onPress={() => setCategory(tab.id)}><View style={styles.tabCopy}><Ionicons name={tab.icon} size={25} color={COLORS.navy} /><Text style={[styles.tabText, category === tab.id && styles.tabTextActive]}>{tab.label}</Text></View>{category === tab.id && <View style={styles.tabLine} />}</TouchableOpacity>)}</View>
         <View style={styles.note}><Text style={styles.noteText}>{currentTab.note}</Text></View>
       </>}
-      renderItem={({ item }) => { const snack = item.category === 'snacks'; const cardContent = <><View style={styles.photoWrap}>{item.image_url ? <Image source={{ uri: item.image_url }} style={styles.photo} /> : <View style={styles.photoPlaceholder}><Ionicons name="fast-food-outline" size={38} color={COLORS.muted} /></View>}{item.status === 'sold_out' && <View style={styles.sold}><Text style={styles.soldText}>SOLD OUT</Text></View>}</View><View style={styles.cardInfo}><View style={styles.nameRow}><Text numberOfLines={1} style={styles.productName}>{item.name}</Text>{snack ? <TouchableOpacity onPress={() => update(item, 1)} disabled={item.status === 'sold_out'}><Ionicons name="cart-outline" size={21} color={COLORS.cream} /></TouchableOpacity> : <Ionicons name="cart-outline" size={21} color={COLORS.cream} />}</View><View style={styles.purchaseRow}>{snack ? <View style={styles.stepper}><TouchableOpacity onPress={() => update(item, -1)} disabled={item.status === 'sold_out'}><Text style={styles.step}>−</Text></TouchableOpacity><Text style={styles.quantity}>{quantity(item.id)}</Text><TouchableOpacity onPress={() => update(item, 1)} disabled={item.status === 'sold_out'}><Text style={styles.step}>+</Text></TouchableOpacity></View> : <Text style={styles.customise}>Customise order</Text>}<Text style={styles.price}>{money(item.price)}</Text></View></View></>; return snack ? <View style={[styles.card, { width: cardWidth }]}>{cardContent}</View> : <TouchableOpacity activeOpacity={0.9} style={[styles.card, { width: cardWidth }]} onPress={() => router.push({ pathname: '/(buyer)/cafeteria/[productId]', params: { productId: item.id } })}>{cardContent}</TouchableOpacity>; }}
+      renderItem={({ item }) => { const snack = item.category === 'snacks'; const cardContent = <><View style={styles.photoWrap}>{item.image_url ? <Image source={{ uri: item.image_url }} style={styles.photo} /> : <View style={styles.photoPlaceholder}><Ionicons name="fast-food-outline" size={38} color={COLORS.muted} /></View>}{item.status === 'sold_out' && <View style={styles.sold}><Text style={styles.soldText}>SOLD OUT</Text></View>}</View><View style={styles.cardInfo}><View style={styles.nameRow}><Text numberOfLines={1} style={styles.productName}>{item.name}</Text>{snack ? <TouchableOpacity onPress={() => void addOrCustomise(item)} disabled={item.status === 'sold_out'}><Ionicons name="cart-outline" size={21} color={COLORS.cream} /></TouchableOpacity> : <TouchableOpacity onPress={() => void addOrCustomise(item)} disabled={item.status === 'sold_out'}><Ionicons name="cart-outline" size={21} color={COLORS.cream} /></TouchableOpacity>}</View><View style={styles.purchaseRow}>{snack ? <View style={styles.stepper}><TouchableOpacity onPress={() => update(item, -1)} disabled={item.status === 'sold_out'}><Text style={styles.step}>−</Text></TouchableOpacity><Text style={styles.quantity}>{quantity(item.id)}</Text><TouchableOpacity onPress={() => void addOrCustomise(item)} disabled={item.status === 'sold_out'}><Text style={styles.step}>+</Text></TouchableOpacity></View> : <Text style={styles.customise}>Customise order</Text>}<Text style={styles.price}>{money(item.price)}</Text></View></View></>; return <TouchableOpacity activeOpacity={0.9} style={[styles.card, { width: cardWidth }]} onPress={() => openProduct(item)}>{cardContent}</TouchableOpacity>; }}
       ListEmptyComponent={loading ? <ActivityIndicator style={styles.loading} size="large" color={COLORS.mint} /> : <Text style={styles.empty}>No {currentTab.label.toLowerCase()} available right now.</Text>}
     />
-    <CartToast visible={Boolean(cartToast)} message={cartToast} onDismiss={() => setCartToast('')} />
     {count > 0 && <TouchableOpacity style={styles.cartBar} onPress={() => router.push('/(buyer)/cart')}><View style={styles.count}><Text style={styles.countText}>{count}</Text></View><Text style={styles.cartLabel}>View cart</Text><Text style={styles.cartTotal}>{money(total)}</Text></TouchableOpacity>}
     <View style={styles.footer}>{[['home-outline', 'Home'], ['restaurant-outline', 'Cafeteria'], ['sparkles-outline', 'Services'], ['person-outline', 'Profile']].map(([icon, label]) => <TouchableOpacity key={label} style={styles.footerItem} onPress={() => label === 'Home' ? router.replace('/(buyer)') : label === 'Services' ? router.push('/(buyer)/services') : label === 'Profile' ? router.push('/(buyer)/profile') : undefined}><Ionicons name={icon as keyof typeof Ionicons.glyphMap} size={29} color={label === 'Cafeteria' ? COLORS.mint : COLORS.cream} /><Text style={[styles.footerText, label === 'Cafeteria' && styles.footerTextActive]}>{label}</Text></TouchableOpacity>)}</View>
   </View>;

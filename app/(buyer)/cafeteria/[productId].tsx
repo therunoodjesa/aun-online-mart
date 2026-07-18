@@ -7,7 +7,6 @@ import { supabase } from '../../../lib/supabase';
 import { useCartStore } from '../../../store/cartstore';
 import { FavouriteButton } from '../../../components/FavouriteButton';
 import { isFavourited } from '../../../lib/favourites';
-import { CartToast } from '../../../components/CartToast';
 
 const CAFETERIA_FALLBACK = require('../../../assets/images/home/jollof-promo.png');
 type Product = { id: string; name: string; description: string | null; category: string; price: number; image_url: string | null; status: 'available' | 'sold_out' | 'hidden'; meal_plan_eligible: boolean };
@@ -27,7 +26,6 @@ export default function CafeteriaProductPage() {
   const [loading, setLoading] = useState(true);
   const [heroImageFailed, setHeroImageFailed] = useState(false);
   const [favourite, setFavourite] = useState(false);
-  const [cartToast, setCartToast] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -55,10 +53,8 @@ export default function CafeteriaProductPage() {
     const choices = selectedOptions.map((option) => option.name).join(' · ') || 'No extras';
     const key = `${product.id}:${selectedOptions.map((option) => option.id).join(':') || 'none'}:${note.trim() || 'no-note'}`;
     for (let index = 0; index < quantity; index += 1) addItem({ productId: `cafeteria:${key}`, name: `${product.name} · ${choices}`, category: `Cafeteria · ${product.category}`, price: unitPrice, imageUrl: product.image_url, mealPlanEligible: product.meal_plan_eligible });
-    setCartToast(`${product.name} added to cart`);
   };
   const openRelated = (item: Product) => router.push({ pathname: '/(buyer)/cafeteria/[productId]', params: { productId: item.id } });
-  const addRelated = (item: Product) => { addItem({ productId: `cafeteria:${item.id}`, name: item.name, category: `Cafeteria · ${item.category}`, price: item.price, imageUrl: item.image_url, mealPlanEligible: item.meal_plan_eligible }); setCartToast(`${item.name} added to cart`); };
 
   if (loading) return <View style={styles.loading}><ActivityIndicator size="large" color="#68ECCB" /></View>;
   if (!product) return <View style={styles.loading}><Text style={styles.notFound}>This cafeteria item is unavailable.</Text><TouchableOpacity onPress={goBack}><Text style={styles.return}>Return to cafeteria</Text></TouchableOpacity></View>;
@@ -69,10 +65,9 @@ export default function CafeteriaProductPage() {
       <View style={styles.details}><Text style={styles.title}>{product.name}</Text><View style={styles.rating}><Ionicons name="star" size={18} color="#D7B300" /><Text style={styles.ratingNumber}>4.9</Text><Text style={styles.orders}>(0 orders)</Text></View>{product.description?.trim() ? <Text style={styles.description}>{product.description}</Text> : null}
         {optionGroups.length > 0 ? optionGroups.map(([group, groupChoices]) => <View key={group}><Text style={styles.sectionLabel}>CHOOSE ONE {group.toUpperCase()}</Text><View style={styles.optionList}>{groupChoices.map((choice) => { const selected = selections[group] === choice.id; return <TouchableOpacity key={choice.id} style={[styles.optionRow, selected && styles.optionActive]} onPress={() => setSelections((current) => ({ ...current, [group]: selected ? '' : choice.id }))}><Text style={styles.optionName}>{choice.name}</Text><View style={styles.optionRight}><Text style={styles.optionPrice}>{choice.price_modifier ? `+${price(choice.price_modifier)}` : 'Included'}</Text><View style={[styles.radio, selected && styles.radioActive]}>{selected && <Ionicons name="checkmark" size={13} color="#F8F3ED" />}</View></View></TouchableOpacity>; })}</View></View>) : <View style={styles.readyCard}><Ionicons name="restaurant-outline" size={22} color="#00695A" /><Text style={styles.readyText}>This item is ready to order. Adjust the quantity below and add it to your cart.</Text></View>}
         <Text style={styles.sectionLabel}>SPECIAL INSTRUCTIONS</Text><View style={styles.noteBox}><Ionicons name="pencil" size={19} color="#7E7E7E" /><TextInput value={note} onChangeText={setNote} placeholder="Write any special request for the cafeteria" placeholderTextColor="#7E7E7E" style={[styles.noteInput, { height: 54, paddingVertical: 0, textAlignVertical: 'center', includeFontPadding: false }]} /></View>
-        {related.length > 0 && <View style={styles.relatedSection}><Text style={styles.relatedTitle}>Customers also liked</Text><View style={styles.relatedGrid}>{related.map((item) => <View key={item.id} style={styles.relatedCard}><TouchableOpacity onPress={() => openRelated(item)}><Image source={item.image_url ? { uri: item.image_url } : CAFETERIA_FALLBACK} style={styles.relatedImage} /><Text numberOfLines={1} style={styles.relatedName}>{item.name}</Text></TouchableOpacity><View style={styles.relatedFooter}><Text style={styles.relatedPrice}>{price(item.price)}</Text><TouchableOpacity onPress={() => addRelated(item)} style={styles.relatedCart} accessibilityLabel={`Add ${item.name} to cart`}><Ionicons name="cart" size={17} color="#F8F3ED" /></TouchableOpacity></View></View>)}</View></View>}
+        {related.length > 0 && <View style={styles.relatedSection}><Text style={styles.relatedTitle}>Customers also liked</Text><View style={styles.relatedGrid}>{related.map((item) => <View key={item.id} style={styles.relatedCard}><TouchableOpacity onPress={() => openRelated(item)}><Image source={item.image_url ? { uri: item.image_url } : CAFETERIA_FALLBACK} style={styles.relatedImage} /><Text numberOfLines={1} style={styles.relatedName}>{item.name}</Text></TouchableOpacity><View style={styles.relatedFooter}><Text style={styles.relatedPrice}>{price(item.price)}</Text><TouchableOpacity onPress={() => openRelated(item)} style={styles.relatedCart} accessibilityLabel={`Add ${item.name} to cart`}><Ionicons name="cart" size={17} color="#F8F3ED" /></TouchableOpacity></View></View>)}</View></View>}
       </View>
     </ScrollView>
-    <CartToast visible={Boolean(cartToast)} message={cartToast} onDismiss={() => setCartToast('')} />
     <View style={styles.bottomBar}><View style={styles.quantity}><TouchableOpacity style={styles.quantityButton} onPress={() => setQuantity((value) => Math.max(1, value - 1))}><Ionicons name="remove" size={17} color="#68ECCB" /></TouchableOpacity><Text style={styles.quantityText}>{quantity}</Text><TouchableOpacity style={styles.quantityButton} onPress={() => setQuantity((value) => value + 1)}><Ionicons name="add" size={17} color="#68ECCB" /></TouchableOpacity></View><TouchableOpacity style={styles.addButton} onPress={addToCart} disabled={product.status !== 'available'}><Ionicons name="cart" size={20} color="#F8F3ED" /><Text style={styles.addText}>{product.status === 'available' ? `Add to cart · ${price(total)}` : 'Sold out'}</Text></TouchableOpacity></View>
   </View>;
 }
