@@ -181,7 +181,7 @@ async function updatePayout(db: ReturnType<typeof admin>, payoutId: string, stat
 }
 
 type StoredCartLine = { product_id: string; product_name: string; unit_price: number; quantity: number; selected_options?: unknown[]; note?: string | null };
-type StoredCart = { lines?: StoredCartLine[]; subtotal?: number; total?: number };
+type StoredCart = { lines?: StoredCartLine[]; subtotal?: number; total?: number; deliveryFee?: number; rushHour?: { savings?: number } };
 
 async function ensureOrderItems(db: ReturnType<typeof admin>, orderId: string, lines: StoredCartLine[]) {
   const { count, error: countError } = await db.from('order_items').select('id', { count: 'exact', head: true }).eq('order_id', orderId);
@@ -226,6 +226,8 @@ async function restoreLinkedOrder(db: ReturnType<typeof admin>, intent: { id: st
     amount_paid: 0,
     subtotal,
     total,
+    delivery_fee: Number(intent.cart?.deliveryFee ?? 0),
+    rush_hour_discount: Number(intent.cart?.rushHour?.savings ?? 0),
     delivery_address: intent.delivery_address,
     delivery_slot: intent.delivery_slot,
   }).select('id').single();

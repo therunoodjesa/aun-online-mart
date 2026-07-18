@@ -11,6 +11,7 @@ import { calculateCheckout } from '../../lib/checkout';
 
 type Method = 'paystack' | 'transfer';
 type PickupLocation = { id: string; name: string; pickup_location: string | null; pickup_instructions: string | null };
+type ServerQuote = { subtotal: number; serviceFee: number; deliveryFee: number; total: number; rushHour?: { active?: boolean; standard_delivery_fee?: number; discounted_delivery_fee?: number; savings?: number } };
 const PENDING_PAYMENT_REFERENCE = 'aom_pending_paystack_reference';
 const money = (value: number) => `\u20A6${value.toLocaleString('en-NG')}`;
 
@@ -28,6 +29,7 @@ export default function PaymentPage() {
   const [submittingTransfer, setSubmittingTransfer] = useState(false);
   const [paymentMessage, setPaymentMessage] = useState('');
   const [returnedFromCheckout, setReturnedFromCheckout] = useState(false);
+  const [serverQuote, setServerQuote] = useState<ServerQuote | null>(null);
   const checkoutOpenedRef = useRef(false);
   const verificationInProgressRef = useRef(false);
   const callbackUrl = Platform.OS === 'web' && typeof window !== 'undefined'
@@ -36,8 +38,9 @@ export default function PaymentPage() {
   const isPickup = fulfilment === 'pickup';
   const checkout = useMemo(() => calculateCheckout(items, isPickup ? 'pickup' : 'dispatch', mealPlan === 'true', planCount), [items, isPickup, mealPlan, planCount]);
   const subtotal = checkout.subtotal;
-  const deliveryFee = checkout.deliveryFee;
-  const total = checkout.total;
+  const deliveryFee = serverQuote?.deliveryFee ?? checkout.deliveryFee;
+  const total = serverQuote?.total ?? checkout.total;
+  const serviceFee = serverQuote?.serviceFee ?? checkout.serviceFee;
   const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
   const goBack = () => router.canGoBack() ? router.back() : router.replace('/(buyer)/cart');
   const openTracking = () => {
@@ -76,6 +79,18 @@ export default function PaymentPage() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    const quote = async () => {
+      const marketplaceItems = items.filter((item) => !item.productId.startsWith('cafeteria:'));
+      if (!marketplaceItems.length) { if (active) setServerQuote(null); return; }
+      const { data, error } = await supabase.functions.invoke('checkout-quote', { body: { items: marketplaceItems.map((item) => ({ productId: item.productId, quantity: item.quantity })), fulfilment: isPickup ? 'pickup' : 'delivery', slot: slot ?? null } });
+      if (active) setServerQuote(!error && data?.pricing ? data.pricing as ServerQuote : null);
+    };
+    void quote();
+    return () => { active = false; };
+  }, [items, isPickup, slot]);
+
+  useEffect(() => {
     const loadPickupLocations = async () => {
       if (!isPickup || items.length === 0) { setPickupLocations([]); return; }
       const productIds = [...new Set(items.map((item) => item.productId.split(':')[0]).filter((id) => id.length > 20))];
@@ -100,6 +115,7 @@ export default function PaymentPage() {
     const { data, error } = await supabase.functions.invoke('paystack-initialize', { body: { items: items.map((item) => ({ productId: item.productId, quantity: item.quantity })), fulfilment: isPickup ? 'pickup' : 'delivery', address: address ?? null, slot: slot ?? null, callback_url: callbackUrl } });
     setPaying(false);
     if (error || !data?.authorization_url) { setPaymentMessage(data?.error ?? error?.message ?? 'Could not start secure checkout.'); return; }
+    if (data.pricing) setServerQuote(data.pricing as ServerQuote);
     checkoutOpenedRef.current = true;
     setPaymentReference(data.reference);
     await AsyncStorage.setItem(PENDING_PAYMENT_REFERENCE, data.reference);
@@ -181,7 +197,8 @@ export default function PaymentPage() {
     <View style={styles.header}><TouchableOpacity style={styles.back} onPress={goBack}><Ionicons name="arrow-back-outline" size={23} color="#F8F3ED" /></TouchableOpacity><Text style={styles.headerTitle}>Payment</Text><View style={styles.steps}><View style={styles.stepDone}><Ionicons name="checkmark" size={18} color="#01193D" /></View><View style={styles.stepLine} /><View style={styles.stepDone}><Ionicons name="checkmark" size={18} color="#01193D" /></View><View style={styles.stepLine} /><View style={styles.stepDone}><Ionicons name="checkmark" size={18} color="#01193D" /></View><View style={styles.stepLine} /><View style={styles.stepCurrent}><Text style={styles.stepText}>4</Text></View></View></View>
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       {paymentMessage ? <View style={styles.paymentNotice}><Text style={styles.paymentNoticeText}>{paymentMessage}</Text></View> : null}
-      {checkout.serviceFee > 0 && <View style={{ borderRadius: 10, padding: 13, backgroundColor: '#E1F5EE', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}><Text style={{ color: '#175E63', fontSize: 15, fontWeight: '700' }}>AOM service fee (10%)</Text><Text style={{ color: '#175E63', fontSize: 16, fontWeight: '800' }}>{money(checkout.serviceFee)}</Text></View>}
+      {serverQuote?.rushHour?.active ? <View style={{ borderRadius: 10, padding: 13, backgroundColor: '#E1F5EE', flexDirection: 'row', gap: 9, alignItems: 'center' }}><Ionicons name="flash-outline" size={20} color="#176E73" /><View style={{ flex: 1 }}><Text style={{ color: '#176E73', fontSize: 15, fontWeight: '800' }}>Rush Hour Deal applied</Text><Text style={{ color: '#176E73', fontSize: 13, marginTop: 2 }}>Delivery reduced from {money(Number(serverQuote.rushHour.standard_delivery_fee ?? 2500))} to {money(deliveryFee)} — you save {money(Number(serverQuote.rushHour.savings ?? 0))}.</Text></View></View> : null}
+      {serviceFee > 0 && <View style={{ borderRadius: 10, padding: 13, backgroundColor: '#E1F5EE', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}><Text style={{ color: '#175E63', fontSize: 15, fontWeight: '700' }}>AOM service fee (10%)</Text><Text style={{ color: '#175E63', fontSize: 16, fontWeight: '800' }}>{money(serviceFee)}</Text></View>}
       <View style={styles.summary}><View style={styles.summaryRow}><Text style={styles.summaryLabel}>Subtotal ({itemCount} items)</Text><Text style={styles.summaryValue}>{money(subtotal)}</Text></View>{checkout.packagingFee > 0 && <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Packaging ({checkout.mealCount} meal{checkout.mealCount === 1 ? '' : 's'})</Text><Text style={styles.summaryValue}>{money(checkout.packagingFee)}</Text></View>}<View style={styles.summaryRow}><Text style={styles.summaryLabel}>Delivery fee</Text><Text style={styles.summaryValue}>{isPickup ? 'Free' : money(deliveryFee)}</Text></View>{checkout.mealPlanCredit > 0 && <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Meal-plan credit</Text><Text style={styles.discount}>- {money(checkout.mealPlanCredit)}</Text></View>}<View style={styles.totalRow}><Text style={styles.totalLabel}>Total</Text><Text style={styles.total}>{money(total)}</Text></View></View>
       <View style={styles.destination}><View style={styles.destinationIcon}><Ionicons name={isPickup ? 'walk-outline' : 'cube-outline'} size={23} color="#F8F3ED" /></View><View style={styles.destinationCopy}><Text style={styles.destinationLabel}>{isPickup ? 'PICKUP FROM' : 'DELIVERING TO'}</Text><Text style={styles.destinationTitle}>{isPickup ? pickupTitle : address || 'American University of Nigeria'}</Text><Text style={styles.destinationDetail}>{isPickup ? pickupDetail : slot || 'Choose a delivery slot'}</Text></View></View>
       <View style={styles.methods}><TouchableOpacity style={[styles.method, method === 'transfer' && styles.methodActive]} onPress={() => setMethod('transfer')}><Text style={[styles.methodText, method === 'transfer' && styles.methodTextActive]}>Bank transfer</Text></TouchableOpacity><TouchableOpacity style={[styles.method, method === 'paystack' && styles.methodActive]} onPress={() => setMethod('paystack')}><Text style={[styles.methodText, method === 'paystack' && styles.methodTextActive]}>Paystack</Text></TouchableOpacity></View>

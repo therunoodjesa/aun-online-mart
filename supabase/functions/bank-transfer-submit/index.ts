@@ -9,7 +9,7 @@ Deno.serve(async (request) => {
     if (body.confirmed !== true) return json({ error: 'Confirm that you completed the bank transfer.' }, 400);
 
     const fulfilment = body.fulfilment === 'pickup' ? 'pickup' : 'delivery';
-    const priced = await priceCart(body.items ?? [], fulfilment);
+    const priced = await priceCart(body.items ?? [], fulfilment, typeof body.slot === 'string' ? body.slot : null);
     const reference = `aom_transfer_${crypto.randomUUID().replaceAll('-', '')}`;
     const orderNumber = `AOM-${String(Date.now()).slice(-7)}`;
     const db = admin();
@@ -26,6 +26,8 @@ Deno.serve(async (request) => {
       payment_status: 'pending', payment_reference: reference, amount_paid: 0,
       subtotal: priced.subtotal,
       total: priced.total,
+      delivery_fee: priced.deliveryFee,
+      rush_hour_discount: priced.rushHour.savings,
       delivery_address: body.address ?? null, delivery_slot: body.slot ?? null,
     }).select('id').single();
     if (orderError || !order) throw new Error(orderError?.message ?? 'Could not create your pending order.');
