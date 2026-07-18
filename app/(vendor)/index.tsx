@@ -164,7 +164,7 @@ function Inventory({ vendor, rows, search, setSearch, filter, setFilter, counts,
     <View style={styles.tools}><View style={styles.search}><Ionicons name="search-outline" size={18} color="#7D7D7D" /><TextInput value={search} onChangeText={setSearch} placeholder="Search menu items..." placeholderTextColor="#999999" style={styles.searchInput} /></View><View style={{ flex: 1 }} /><Button icon="options-outline" label="Filter" onPress={() => { setFilterOpen((open) => !open); setSortOpen(false); }} /><Button icon="swap-vertical-outline" label="Sort" onPress={() => { setSortOpen((open) => !open); setFilterOpen(false); }} /></View>
     {filterOpen ? <View style={{ borderWidth: 1, borderColor: '#DCE5EA', borderRadius: 10, backgroundColor: '#F8FAFB', padding: 12, marginBottom: 14 }}><Text style={{ color: '#526273', fontSize: 12, fontWeight: '800', marginBottom: 8 }}>Filter by status</Text><View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>{tabs.map((option) => <TouchableOpacity key={option.id} onPress={() => { setFilter(option.id); setFilterOpen(false); }} style={{ borderWidth: 1, borderColor: filter === option.id ? '#25B68A' : '#D3DCE5', backgroundColor: filter === option.id ? '#E1F6F0' : '#FFFFFF', borderRadius: 16, paddingHorizontal: 11, paddingVertical: 7 }}><Text style={{ color: filter === option.id ? '#176E73' : '#647181', fontSize: 13, fontWeight: '700' }}>{option.label}</Text></TouchableOpacity>)}</View></View> : null}
     {sortOpen ? <View style={{ borderWidth: 1, borderColor: '#DCE5EA', borderRadius: 10, backgroundColor: '#F8FAFB', padding: 12, marginBottom: 14 }}><Text style={{ color: '#526273', fontSize: 12, fontWeight: '800', marginBottom: 8 }}>Sort inventory</Text><View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>{([{ id: 'placement', label: 'Your placement' }, { id: 'name', label: 'Name A–Z' }, { id: 'price_low', label: 'Price low–high' }, { id: 'price_high', label: 'Price high–low' }, { id: 'stock_low', label: 'Low stock first' }] as const).map((option) => <TouchableOpacity key={option.id} onPress={() => { setSortBy(option.id); setSortOpen(false); }} style={{ borderWidth: 1, borderColor: sortBy === option.id ? '#25B68A' : '#D3DCE5', backgroundColor: sortBy === option.id ? '#E1F6F0' : '#FFFFFF', borderRadius: 16, paddingHorizontal: 11, paddingVertical: 7 }}><Text style={{ color: sortBy === option.id ? '#176E73' : '#647181', fontSize: 13, fontWeight: '700' }}>{option.label}</Text></TouchableOpacity>)}</View></View> : null}
-    <View style={styles.headerRow}><View style={inventoryStyles.placementColumn} /><Text style={[styles.column, inventoryStyles.itemColumn]}>ITEM</Text><Text style={styles.column}>PRICE</Text><Text style={[styles.column, inventoryStyles.statusColumn]}>STATUS</Text><Text style={[styles.column, inventoryStyles.actionsColumn]}>ACTIONS</Text></View>
+    <View style={styles.headerRow}><View style={inventoryStyles.itemLeadColumn} /><Text style={[styles.column, inventoryStyles.itemColumn]}>ITEM</Text><Text style={styles.column}>PRICE</Text><Text style={[styles.column, inventoryStyles.statusColumn]}>STATUS</Text><Text style={[styles.column, inventoryStyles.stockColumn]}>STOCK</Text><Text style={[styles.column, inventoryStyles.actionsColumn]}>ACTIONS</Text></View>
     <FlatList
       data={sortedRows}
       keyExtractor={(item) => item.id}
@@ -174,12 +174,14 @@ function Inventory({ vendor, rows, search, setSearch, filter, setFilter, counts,
         <View style={inventoryStyles.itemColumn}><Text style={styles.itemName}>{item.name}</Text><Text style={styles.itemSub}>{item.category ?? 'Menu item'}</Text></View>
         <Text style={styles.price}>{'₦' + item.price.toLocaleString('en-NG')}</Text>
         <View style={inventoryStyles.statusColumn}><View style={[styles.status, item.status === 'sold_out' && styles.sold, item.status === 'hidden' && styles.hidden]}><View style={styles.statusDot} /><Text style={styles.statusText}>{item.status === 'available' ? 'Available' : item.status === 'sold_out' ? 'Sold out' : 'Hidden'}</Text></View></View>
-        <View style={inventoryStyles.actions}>
+        <View style={inventoryStyles.stockColumn}>
           <View style={styles.stockControl}>
             <TouchableOpacity disabled={Number(item.stock_quantity ?? 0) <= 0} onPress={() => setStock(item, -1)} style={[styles.stockButton, Number(item.stock_quantity ?? 0) <= 0 && styles.stockButtonDisabled]}><Ionicons name="remove" size={15} color="#176E73" /></TouchableOpacity>
             <TextInput key={`${item.id}-${item.stock_quantity ?? 'empty'}`} defaultValue={item.stock_quantity === null ? '' : String(item.stock_quantity)} onEndEditing={(event) => setStockValue(item, event.nativeEvent.text)} keyboardType="number-pad" placeholder="Set stock" placeholderTextColor="#8796A3" style={inventoryStyles.stockInput} />
             <TouchableOpacity onPress={() => setStock(item, 1)} style={styles.stockButton}><Ionicons name="add" size={15} color="#176E73" /></TouchableOpacity>
           </View>
+        </View>
+        <View style={inventoryStyles.actions}>
           <EditProductButton productId={item.id} />
           <TouchableOpacity onPress={() => item.status === 'available' ? setStatus(item, 'sold_out') : Number(item.stock_quantity ?? 0) > 0 ? setStatus(item, 'available') : Alert.alert('Add stock first', 'Use the plus button to add stock before making this item available.')} style={styles.iconButton}><Ionicons name={item.status === 'available' ? 'close-outline' : 'checkmark-outline'} size={19} color="#176E73" /></TouchableOpacity>
           <TouchableOpacity onPress={() => setStatus(item, item.status === 'hidden' ? (Number(item.stock_quantity ?? 0) === 0 ? 'sold_out' : 'available') : 'hidden')} style={styles.iconButton}><Ionicons name={item.status === 'hidden' ? 'eye-outline' : 'eye-off-outline'} size={18} color="#526273" /></TouchableOpacity>
@@ -418,13 +420,15 @@ function EditProductButton({ productId }: { productId: string }) {
 
 const inventoryStyles = StyleSheet.create({
   placementColumn: { width: 34 },
+  itemLeadColumn: { width: 103 },
   placementHandle: { width: 34, height: 48, alignItems: 'center', justifyContent: 'center', gap: 5, cursor: 'grab' as any },
   handleLong: { width: 18, height: 2, borderRadius: 1, backgroundColor: '#176E73' },
   handleShort: { width: 12, height: 2, borderRadius: 1, backgroundColor: '#176E73' },
-  itemColumn: { flex: 2.2 },
-  statusColumn: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  actionsColumn: { flex: 1.55, textAlign: 'center' },
-  actions: { flex: 1.55, flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: 'flex-end' },
+  itemColumn: { flex: 2.1 },
+  statusColumn: { flex: 1.1, alignItems: 'center', justifyContent: 'center', textAlign: 'center' },
+  stockColumn: { flex: 1.15, alignItems: 'center', justifyContent: 'center', textAlign: 'center' },
+  actionsColumn: { flex: 1.2, textAlign: 'center' },
+  actions: { flex: 1.2, flexDirection: 'row', gap: 7, alignItems: 'center', justifyContent: 'center' },
   stockInput: { minWidth: 48, color: '#176E73', textAlign: 'center', fontSize: 12, fontWeight: '800', paddingVertical: 4, paddingHorizontal: 2 },
 });
 
