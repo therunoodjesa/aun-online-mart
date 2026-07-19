@@ -71,7 +71,15 @@ export default function SupermarketProductPage() {
     if (!product) return;
     const variant = selectedOption ? ` · ${selectedOption.name}` : '';
     for (let item = 0; item < quantity; item += 1) {
-      addItem({ productId: `${product.id}:${selectedOption?.id ?? 'default'}:${note.trim() || 'no-note'}`, name: `${product.name}${variant}`, category: product.category, price: unitPrice, imageUrl: product.image_url });
+      addItem({
+        productId: `${product.id}:${selectedOption?.id ?? 'default'}:${note.trim() || 'no-note'}`,
+        name: `${product.name}${variant}`,
+        category: product.category,
+        price: unitPrice,
+        imageUrl: product.image_url,
+        selectedOptions: selectedOption ? [{ id: selectedOption.id, name: selectedOption.name, quantity: 1, priceModifier: Number(selectedOption.price_modifier) }] : [],
+        note: note.trim() || null,
+      });
     }
     setCartToast('added');
   };

@@ -42,11 +42,17 @@ export default function PaymentPage() {
     : ExpoLinking.createURL('/payment');
   const isPickup = fulfilment === 'pickup';
   const checkout = useMemo(() => calculateCheckout(items, isPickup ? 'pickup' : 'dispatch', mealPlan === 'true', planCount), [items, isPickup, mealPlan, planCount]);
-  const subtotal = checkout.subtotal;
+  const subtotal = serverQuote?.subtotal ?? checkout.subtotal;
   const deliveryFee = serverQuote?.deliveryFee ?? checkout.deliveryFee;
   const total = serverQuote?.total ?? checkout.total;
   const serviceFee = serverQuote?.serviceFee ?? checkout.serviceFee;
   const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
+  const checkoutItems = useMemo(() => items.map((item) => ({
+    productId: item.productId,
+    quantity: item.quantity,
+    selectedOptions: item.selectedOptions?.map((option) => ({ id: option.id, quantity: option.quantity })),
+    note: item.note ?? null,
+  })), [items]);
   const goBack = () => router.canGoBack() ? router.back() : router.replace('/(buyer)/cart');
   const openTracking = () => {
     if (paying || verifying || submittingTransfer) return;
@@ -87,8 +93,9 @@ export default function PaymentPage() {
     let active = true;
     const quote = async () => {
       const marketplaceItems = items.filter((item) => !item.productId.startsWith('cafeteria:'));
-      if (!marketplaceItems.length) { if (active) setServerQuote(null); return; }
-      const { data, error } = await supabase.functions.invoke('checkout-quote', { body: { items: marketplaceItems.map((item) => ({ productId: item.productId, quantity: item.quantity })), fulfilment: isPickup ? 'pickup' : 'delivery', slot: slot ?? null } });
+      if (!marketplaceItems.length || marketplaceItems.length !== items.length) { if (active) setServerQuote(null); return; }
+      const quoteItems = marketplaceItems.map((item) => ({ productId: item.productId, quantity: item.quantity, selectedOptions: item.selectedOptions?.map((option) => ({ id: option.id, quantity: option.quantity })), note: item.note ?? null }));
+      const { data, error } = await supabase.functions.invoke('checkout-quote', { body: { items: quoteItems, fulfilment: isPickup ? 'pickup' : 'delivery', slot: slot ?? null } });
       if (active) setServerQuote(!error && data?.pricing ? data.pricing as ServerQuote : null);
     };
     void quote();
@@ -117,7 +124,7 @@ export default function PaymentPage() {
     setReturnedFromCheckout(false);
     await AsyncStorage.removeItem(PENDING_PAYMENT_REFERENCE);
     setPaying(true); setPaymentMessage('');
-    const { data, error } = await supabase.functions.invoke('paystack-initialize', { body: { items: items.map((item) => ({ productId: item.productId, quantity: item.quantity })), fulfilment: isPickup ? 'pickup' : 'delivery', address: address ?? null, slot: slot ?? null, callback_url: callbackUrl } });
+    const { data, error } = await supabase.functions.invoke('paystack-initialize', { body: { items: checkoutItems, fulfilment: isPickup ? 'pickup' : 'delivery', address: address ?? null, slot: slot ?? null, callback_url: callbackUrl } });
     setPaying(false);
     if (error || !data?.authorization_url) { setPaymentMessage(data?.error ?? error?.message ?? 'Could not start secure checkout.'); return; }
     if (data.pricing) setServerQuote(data.pricing as ServerQuote);
@@ -167,7 +174,7 @@ export default function PaymentPage() {
     setPaymentMessage('');
     const { data, error } = await supabase.functions.invoke('bank-transfer-submit', {
       body: {
-        items: items.map((item) => ({ productId: item.productId, quantity: item.quantity })),
+        items: checkoutItems,
         fulfilment: isPickup ? 'pickup' : 'delivery',
         address: address ?? null,
         slot: slot ?? null,

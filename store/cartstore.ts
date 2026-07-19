@@ -7,6 +7,13 @@ export type CartItem = {
   price: number;
   imageUrl?: string | null;
   mealPlanEligible?: boolean;
+  selectedOptions?: {
+    id: string;
+    name: string;
+    quantity: number;
+    priceModifier: number;
+  }[];
+  note?: string | null;
   quantity: number;
 };
 

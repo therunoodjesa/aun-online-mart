@@ -28,8 +28,20 @@ export async function paystack(path: string, init?: RequestInit) {
 }
 
 export type CheckoutLine = { product_id: string; product_name: string; unit_price: number; quantity: number; selected_options: unknown[]; note: string | null };
+type RawCheckoutOption = { id: string; quantity?: number };
+type RawCheckoutItem = { productId: string; quantity: number; selectedOptions?: RawCheckoutOption[]; note?: string | null };
 
-export async function priceCart(rawItems: { productId: string; quantity: number }[], fulfilment: 'delivery' | 'pickup' = 'delivery', deliverySlot: string | null = null) {
+const uuidPattern = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+
+function legacyOptionSelections(productId: string): RawCheckoutOption[] {
+  const suffix = productId.length > 36 ? productId.slice(37) : '';
+  const quantityMatches = [...suffix.matchAll(new RegExp(`(${uuidPattern})-(\\d+)`, 'gi'))];
+  if (quantityMatches.length) return quantityMatches.map((match) => ({ id: match[1], quantity: Number(match[2]) }));
+  const bareOption = suffix.split(':').find((segment) => new RegExp(`^${uuidPattern}$`, 'i').test(segment));
+  return bareOption ? [{ id: bareOption, quantity: 1 }] : [];
+}
+
+export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delivery' | 'pickup' = 'delivery', deliverySlot: string | null = null) {
   const normalised = rawItems.map((item) => ({ ...item, productId: String(item.productId) })).filter((item) => item.quantity > 0 && item.quantity <= 25);
   if (!normalised.length) throw new Error('Your cart is empty.');
   if (normalised.some((item) => item.productId.startsWith('cafeteria:'))) throw new Error('Cafeteria checkout is being connected separately. Please remove cafeteria items to pay for this order.');
@@ -44,18 +56,23 @@ export async function priceCart(rawItems: { productId: string; quantity: number 
   }
   const shortProduct = products.find((product) => product.stock_quantity !== null && Number(product.stock_quantity) < (requestedByProduct.get(product.id) ?? 0));
   if (shortProduct) throw new Error(`${shortProduct.name} does not have enough stock for this order. Please adjust your cart.`);
-  const { data: options } = await db.from('product_options').select('id, name, price_modifier, is_available').in('product_id', ids).eq('is_available', true);
+  const { data: options } = await db.from('product_options').select('id, product_id, name, price_modifier, is_available').in('product_id', ids).eq('is_available', true);
   const byId = new Map(products.map((product) => [product.id, product]));
   const optionsById = new Map((options ?? []).map((option) => [option.id, option]));
   const lines: CheckoutLine[] = normalised.map((item) => {
     const productId = item.productId.slice(0, 36);
     const product = byId.get(productId)!;
-    const optionKey = item.productId.slice(37).split(':')[0] ?? '';
-    const matches = [...optionKey.matchAll(/([0-9a-f]{8}-[0-9a-f-]{27,36})-(\d+)/gi)];
-    const selected = matches.flatMap((match) => { const option = optionsById.get(match[1]); const quantity = Number(match[2]); return option && quantity > 0 ? [{ id: option.id, name: option.name, quantity, price_modifier: Number(option.price_modifier) }] : []; });
-    if (!matches.length && /^[0-9a-f-]{36}$/i.test(optionKey)) { const option = optionsById.get(optionKey); if (option) selected.push({ id: option.id, name: option.name, quantity: 1, price_modifier: Number(option.price_modifier) }); }
+    const requestedOptions = Array.isArray(item.selectedOptions) ? item.selectedOptions : legacyOptionSelections(item.productId);
+    const selected: { id: string; name: string; quantity: number; price_modifier: number }[] = [];
+    for (const selection of requestedOptions) {
+      const option = optionsById.get(String(selection.id));
+      const quantity = Math.max(0, Math.floor(Number(selection.quantity ?? 1)));
+      if (quantity <= 0) continue;
+      if (!option || option.product_id !== product.id) throw new Error(`A selected option for ${product.name} is no longer available. Please reopen the item and choose again.`);
+      selected.push({ id: option.id, name: option.name, quantity, price_modifier: Number(option.price_modifier) });
+    }
     const unitPrice = Number(product.price) + selected.reduce((total, option) => total + option.price_modifier * option.quantity, 0);
-    return { product_id: product.id, product_name: product.name, unit_price: unitPrice, quantity: Math.floor(item.quantity), selected_options: selected, note: null };
+    return { product_id: product.id, product_name: product.name, unit_price: unitPrice, quantity: Math.floor(item.quantity), selected_options: selected, note: typeof item.note === 'string' && item.note.trim() ? item.note.trim().slice(0, 500) : null };
   });
   const subtotal = lines.reduce((total, line) => total + line.unit_price * line.quantity, 0);
   const serviceFee = Math.round(subtotal * 0.1);

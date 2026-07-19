@@ -81,8 +81,14 @@ export default function MarketplaceProductPage() {
     const selectedChoices = options.filter((item) => item.selection_mode === 'single' ? singleSelections[item.option_group] === item.id : (optionQuantities[item.id] ?? 0) > 0);
     const selection = selectedChoices.map((item) => item.selection_mode === 'single' ? item.name : `${item.name} ×${optionQuantities[item.id]}`).join(' · ') || 'No extras';
     const selectionKey = options.map((item) => `${item.id}-${item.selection_mode === 'single' ? (singleSelections[item.option_group] === item.id ? 1 : 0) : (optionQuantities[item.id] ?? 0)}`).join(':');
+    const selectedOptions = selectedChoices.map((item) => ({
+      id: item.id,
+      name: item.name,
+      quantity: item.selection_mode === 'single' ? 1 : optionQuantities[item.id] ?? 0,
+      priceModifier: Number(item.price_modifier),
+    }));
     for (let count = 0; count < quantity; count += 1) {
-      addItem({ productId: `${product.id}:${selectionKey}:${note.trim() || 'no-note'}`, name: `${product.name} · ${selection}`, category: vendorName, price: unitPrice, imageUrl: product.image_url });
+      addItem({ productId: `${product.id}:${selectionKey}:${note.trim() || 'no-note'}`, name: `${product.name} · ${selection}`, category: vendorName, price: unitPrice, imageUrl: product.image_url, selectedOptions, note: note.trim() || null });
     }
     setCartToast('added');
   };
