@@ -7,6 +7,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authstore';
+import { resolveAccountHome } from '../lib/account-route';
 
 const { width, height } = Dimensions.get('window');
 
@@ -22,12 +23,7 @@ export default function SplashScreen() {
       if (!session?.user) { router.replace('/onboarding'); return; }
       useAuthStore.getState().setSession(session);
       await useAuthStore.getState().fetchProfile(session.user.id);
-      const { data: administrator } = await supabase.from('admin_users').select('user_id').eq('user_id', session.user.id).maybeSingle();
-      if (administrator) { router.replace('/admin-portal'); return; }
-      const { data: cafeteriaStaff } = await supabase.from('cafeteria_staff').select('user_id').eq('user_id', session.user.id).eq('is_active', true).maybeSingle();
-      if (cafeteriaStaff) { router.replace('/cafeteria-portal'); return; }
-      const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_id', session.user.id).maybeSingle();
-      router.replace(session.user.user_metadata?.role === 'vendor' || vendor ? '/vendor-portal' : '/(buyer)/');
+      router.replace(await resolveAccountHome(session.user));
     } catch {
       router.replace('/onboarding');
     }

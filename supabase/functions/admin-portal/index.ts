@@ -26,7 +26,7 @@ async function dashboard(db: ReturnType<typeof admin>) {
     db.from('vendor_payout_requests').select('*', { count: 'exact', head: true }).in('status', ['requested', 'processing']),
     db.from('orders').select('*', { count: 'exact', head: true }).eq('payment_status', 'paid').in('status', ['ready', 'out_for_delivery']),
     db.from('payment_intents').select('id, reference, amount_kobo, order_id, delivery_address, fulfilment, created_at').eq('payment_channel', 'bank_transfer').eq('status', 'pending').order('created_at', { ascending: false }).limit(25),
-    db.from('vendor_applications').select('id, store_name, contact_name, phone, store_type, address, pickup_location, created_at').eq('status', 'pending').order('created_at', { ascending: false }).limit(25),
+    db.from('vendor_applications').select('id, store_name, contact_name, phone, store_type, category, address, pickup_location, created_at').eq('status', 'pending').order('created_at', { ascending: false }).limit(25),
     db.from('vendor_payout_requests').select('id, vendor_id, amount, status, requested_at, processed_at, reference, note').in('status', ['requested', 'processing']).order('requested_at', { ascending: true }).limit(50),
     db.from('orders').select('id, order_number, status, delivery_type, delivery_address, delivery_slot, rider_name, rider_phone, rider_assigned_at, dispatch_status, created_at').eq('payment_status', 'paid').in('status', ['ready', 'out_for_delivery']).order('created_at', { ascending: true }).limit(50),
     db.from('delivery_riders').select('id, full_name, phone, accepts_calls, accepts_whatsapp, coverage_area, availability').eq('availability', 'active').order('full_name'),

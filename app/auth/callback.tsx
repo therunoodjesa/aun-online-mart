@@ -4,6 +4,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authstore';
+import { resolveAccountHome } from '../../lib/account-route';
 
 export default function GoogleAuthCallback() {
   const router = useRouter();
@@ -18,7 +19,7 @@ export default function GoogleAuthCallback() {
       const { data, error } = await supabase.auth.exchangeCodeForSession(code);
       if (error || !data.user) { setMessage(error?.message ?? 'Could not complete Google sign-in.'); return; }
       await fetchProfile(data.user.id);
-      router.replace('/(buyer)/');
+      router.replace(await resolveAccountHome(data.user));
     };
     void finishSignIn();
   }, [code, errorDescription, fetchProfile, router]);

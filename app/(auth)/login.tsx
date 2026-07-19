@@ -10,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authstore';
 import { beginGoogleSignIn } from '../../lib/google-auth';
+import { resolveAccountHome } from '../../lib/account-route';
 
 const { width } = Dimensions.get('window');
 const S = width / 430;
@@ -47,17 +48,7 @@ export default function Login() {
     }
     if (data.user) {
       await fetchProfile(data.user.id);
-      const { data: administrator } = await supabase.from('admin_users').select('user_id').eq('user_id', data.user.id).maybeSingle();
-      if (administrator) { router.replace('/admin-portal'); return; }
-      const { data: cafeteriaStaff } = await supabase.from('cafeteria_staff').select('user_id').eq('user_id', data.user.id).eq('is_active', true).maybeSingle();
-      if (cafeteriaStaff) { router.replace('/cafeteria-portal'); return; }
-      const { data: vendor } = await supabase
-        .from('vendors')
-        .select('id')
-        .eq('owner_id', data.user.id)
-        .maybeSingle();
-      const isVendor = data.user.user_metadata?.role === 'vendor' || Boolean(vendor);
-      router.replace(isVendor ? '/vendor-portal' : '/(buyer)/');
+      router.replace(await resolveAccountHome(data.user));
     }
   };
 
