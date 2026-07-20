@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   ScrollView, Image,
-  ActivityIndicator, Alert
+  ActivityIndicator, Alert, useWindowDimensions
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -43,6 +43,8 @@ type Vendor = {
 export default function VendorPage() {
   const router = useRouter();
   const { vendorId } = useLocalSearchParams<{ vendorId: string }>();
+  const { width: viewportWidth } = useWindowDimensions();
+  const cardWidth = (Math.min(viewportWidth, 430) - 44) / 2;
 
   const [vendor, setVendor] = useState<Vendor | null>(null);
   const [loading, setLoading] = useState(true);
@@ -288,19 +290,14 @@ export default function VendorPage() {
             }, []).map((row, rowIndex) => (
               <View key={rowIndex} style={styles.productRow}>
                 {row.map(product => (
-                  <TouchableOpacity
+                  <View
                     key={product.id}
                     style={[
-                      styles.productCard,
+                      styles.productCard, { width: cardWidth },
                       product.status === 'sold_out' && styles.productCardSoldOut,
                     ]}
-                    onPress={() => router.push(
-                      `/(buyer)/marketplace/${vendorId}/${product.id}`
-                    )}
-                    activeOpacity={0.9}
-                    disabled={product.status === 'sold_out'}
                   >
-                    <View style={styles.productImg}>
+                    <TouchableOpacity style={styles.productImg} onPress={() => router.push(`/(buyer)/marketplace/${vendorId}/${product.id}`)} activeOpacity={0.9}>
                       {product.image_url ? (
                         <Image
                           source={{ uri: product.image_url }}
@@ -325,13 +322,11 @@ export default function VendorPage() {
                           <Ionicons name="id-card-outline" size={10 * S} color="#fff" />
                         </View>
                       )}
-                    </View>
+                    </TouchableOpacity>
 
                     <View style={styles.productBar}>
                       <View style={styles.productBarTop}>
-                        <Text style={styles.productName} numberOfLines={1}>
-                          {product.name}
-                        </Text>
+                        <TouchableOpacity style={styles.productNamePressable} onPress={() => router.push(`/(buyer)/marketplace/${vendorId}/${product.id}`)}><Text style={styles.productName} numberOfLines={1}>{product.name}</Text></TouchableOpacity>
                         <TouchableOpacity
                           onPress={() => void addOrCustomise(product.id)}
                           disabled={product.status === 'sold_out'}
@@ -347,9 +342,7 @@ export default function VendorPage() {
                           >
                             <Ionicons name="remove-outline" size={14 * S} color="#01193D" />
                           </TouchableOpacity>
-                          <Text style={styles.qtyNum}>
-                            {quantities[product.id] ?? 1}
-                          </Text>
+                          <Text style={styles.qtyNum}>{quantities[product.id] ?? 0}</Text>
                           <TouchableOpacity
                             style={styles.qtyBtn}
                             onPress={() => void addOrCustomise(product.id)}
@@ -362,10 +355,10 @@ export default function VendorPage() {
                         </Text>
                       </View>
                     </View>
-                  </TouchableOpacity>
+                  </View>
                 ))}
                 {row.length === 1 && (
-                  <View style={styles.productCardEmpty} />
+                  <View style={[styles.productCardEmpty, { width: cardWidth }]} />
                 )}
               </View>
             ))
@@ -437,12 +430,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
 
-  infoSection: {
-    backgroundColor: '#F8F3ED',
-    paddingHorizontal: 12 * S,
-    paddingTop: 10 * S,
-    paddingBottom: 10 * S,
-  },
+  infoSection: { backgroundColor: '#F8F3ED', paddingHorizontal: 20 * S, paddingTop: 12 * S, paddingBottom: 10 * S },
   vendorName: {
     fontSize: 28 * S, fontWeight: '800',
     color: '#01193D', marginBottom: 6 * S,
@@ -467,21 +455,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(1,25,61,0.1)',
   },
-  categoryTabs: { paddingHorizontal: 6 * S },
-  categoryTabBtn: {
-    paddingRight: 26 * S,
-    paddingVertical: 20 * S,
-    position: 'relative',
-  },
+  categoryTabs: { height: 66, paddingHorizontal: 10, alignItems: 'center' },
+  categoryTabBtn: { height: 66, paddingHorizontal: 13, justifyContent: 'center', position: 'relative' },
   categoryTab: {
-    fontSize: 20 * S, fontWeight: '500',
-    color: 'rgba(1,25,61,0.4)',
+    fontSize: 16 * S, fontWeight: '500', color: 'rgba(1,25,61,0.4)',
   },
-  categoryTabActive: { color: '#01193D' },
+  categoryTabActive: { color: '#01193D', fontWeight: '700' },
   categoryTabLine: {
-    position: 'absolute', bottom: 0,
-    left: 0, right: 26 * S,
-    height: 5, backgroundColor: '#01193D', borderRadius: 3,
+    position: 'absolute', bottom: 0, left: 8, right: 8, height: 3, backgroundColor: '#01193D', borderRadius: 2,
   },
 
   noticeWrap: {
@@ -505,24 +486,12 @@ const styles = StyleSheet.create({
     fontSize: 14 * S, color: '#085041', lineHeight: 20,
   },
 
-  productsGrid: {
-    paddingHorizontal: 12 * S,
-    paddingTop: 12 * S,
-    backgroundColor: '#F8F3ED',
-  },
-  productRow: {
-    flexDirection: 'row',
-    gap: 8 * S,
-    marginBottom: 8 * S,
-  },
-  productCard: {
-    flex: 1, borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: '#01193D',
-  },
+  productsGrid: { paddingHorizontal: 16, paddingTop: 12, backgroundColor: '#F8F3ED' },
+  productRow: { flexDirection: 'row', gap: 12, marginBottom: 12 },
+  productCard: { borderRadius: 14, overflow: 'hidden', backgroundColor: '#01193D' },
   productCardSoldOut: { opacity: 0.6 },
   productCardEmpty: { flex: 1 },
-  productImg: { width: '100%', height: 143 * S },
+  productImg: { width: '100%', aspectRatio: 1 },
   productImgFile: { width: '100%', height: '100%', resizeMode: 'cover' },
   productImgPlaceholder: {
     width: '100%', height: '100%',
@@ -546,16 +515,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#1D9E75',
     alignItems: 'center', justifyContent: 'center',
   },
-  productBar: { minHeight: 77 * S, backgroundColor: '#01193D', padding: 10 * S, gap: 8 * S },
+  productBar: { backgroundColor: '#01193D', padding: 10, gap: 10 },
   productBarTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  productName: {
-    fontSize: 14 * S, fontWeight: '600',
-    color: '#F8F3ED', flex: 1, marginRight: 6 * S,
-  },
+  productNamePressable: { flex: 1 },
+  productName: { fontSize: 12 * S, fontWeight: '600', color: '#F8F3ED' },
   productBarBottom: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -564,19 +531,17 @@ const styles = StyleSheet.create({
   qtyControl: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: '#F8F3ED', borderRadius: 20,
-    paddingHorizontal: 4 * S, paddingVertical: 3 * S,
-    gap: 8 * S,
+    minWidth: 65, height: 25, paddingHorizontal: 6, gap: 8 * S, justifyContent: 'space-between',
   },
   qtyBtn: {
-    width: 22 * S, height: 22 * S,
+    width: 18 * S, height: 22 * S,
     alignItems: 'center', justifyContent: 'center',
   },
   qtyNum: {
-    fontSize: 13 * S, fontWeight: '600',
-    color: '#01193D', minWidth: 16 * S, textAlign: 'center',
+    fontSize: 11 * S, fontWeight: '700', color: '#01193D', minWidth: 16 * S, textAlign: 'center',
   },
   productPrice: {
-    fontSize: 14 * S, fontWeight: '600', color: '#F8F3ED',
+    fontSize: 12 * S, fontWeight: '700', color: '#F8F3ED',
   },
 
   emptyState: {
