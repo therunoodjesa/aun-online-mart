@@ -1,4 +1,5 @@
 import { corsHeaders, getUser, json, admin, priceCart } from '../_shared/paystack.ts';
+import { captureServerEvent } from '../_shared/posthog.ts';
 
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -40,6 +41,12 @@ Deno.serve(async (request) => {
     if (itemError) throw new Error(itemError.message);
     await db.from('order_updates').insert({ order_id: order.id, message: 'Bank transfer submitted and awaiting payment confirmation', update_type: 'system' });
     await db.from('payment_intents').update({ order_id: order.id }).eq('id', intent.id);
+    await captureServerEvent(user.id, 'bank_transfer_submitted', {
+      order_id: order.id,
+      total: priced.total,
+      item_count: priced.lines.reduce((sum, line) => sum + line.quantity, 0),
+      fulfilment,
+    });
     return json({ status: 'pending_confirmation', order_id: order.id, reference });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : 'Could not submit your bank transfer.' }, 400);

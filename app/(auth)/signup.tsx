@@ -9,6 +9,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { beginGoogleSignIn } from '../../lib/google-auth';
+import { posthog } from '../../lib/posthog';
 
 const { width } = Dimensions.get('window');
 const S = width / 430;
@@ -39,7 +40,7 @@ export default function Signup() {
       return;
     }
     setLoading(true);
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -53,16 +54,26 @@ export default function Signup() {
     });
     setLoading(false);
     if (error) {
+      posthog.captureException(error, { flow: 'password_signup', role });
       Alert.alert('Sign up failed', error.message);
       return;
     }
+    if (data.user) {
+      posthog.identify(data.user.id, {
+        email: data.user.email ?? null,
+        full_name: fullName,
+        phone,
+        role,
+      });
+    }
+    posthog.capture('user_signed_up', { role, is_aun_student: isAunEmail, method: 'password' });
     router.replace(role === 'vendor' ? '/vendor-portal' : '/(buyer)/');
   };
 
   const handleGoogleSignup = async () => {
     setGoogleLoading(true);
     try { await beginGoogleSignIn(); }
-    catch (error) { Alert.alert('Google sign-in failed', error instanceof Error ? error.message : 'Please try again.'); }
+    catch (error) { posthog.captureException(error, { flow: 'google_signup', role }); Alert.alert('Google sign-in failed', error instanceof Error ? error.message : 'Please try again.'); }
     finally { setGoogleLoading(false); }
   };
 

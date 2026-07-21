@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { Session } from '@supabase/supabase-js';
 import { Profile } from '../types';
 import { supabase } from '../lib/supabase';
+import { posthog } from '../lib/posthog';
 
 type AuthStore = {
   session: Session | null;
@@ -31,6 +32,8 @@ export const useAuthStore = create<AuthStore>((set) => ({
   },
 
   signOut: async () => {
+    posthog.capture('user_logged_out');
+    posthog.reset();
     await supabase.auth.signOut();
     set({ session: null, profile: null });
   },

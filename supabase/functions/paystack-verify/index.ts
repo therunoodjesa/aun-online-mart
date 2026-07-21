@@ -1,4 +1,5 @@
 import { corsHeaders, getUser, json, admin, paystack } from '../_shared/paystack.ts';
+import { captureServerEvent } from '../_shared/posthog.ts';
 
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -33,6 +34,13 @@ Deno.serve(async (request) => {
     if (paidOrderError) throw new Error(paidOrderError.message);
     await db.from('order_updates').insert({ order_id: order.id, message: 'Order received and processing', update_type: 'system' });
     await db.from('payment_intents').update({ status: 'paid', order_id: order.id, paystack_transaction_id: Number(transaction.id), paid_at: new Date().toISOString() }).eq('id', intent.id);
+    await captureServerEvent(user.id, 'payment_completed', {
+      order_id: order.id,
+      payment_method: 'paystack',
+      total: cart.total,
+      item_count: cart.lines.reduce((sum, line) => sum + line.quantity, 0),
+      fulfilment: intent.fulfilment,
+    });
     // Alerts are intentionally best-effort: a mail-provider outage must never block a paid order.
     try {
       await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/vendor-order-alert`, {

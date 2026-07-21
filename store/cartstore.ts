@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { posthog } from '../lib/posthog';
 
 export type CartItem = {
   productId: string;
@@ -29,6 +30,12 @@ export const useCartStore = create<CartStore>((set) => ({
   items: [],
   addItem: (item) => set((state) => {
     const existing = state.items.find((cartItem) => cartItem.productId === item.productId);
+    posthog.capture('product_added_to_cart', {
+      product_id: item.productId,
+      category: item.category ?? 'marketplace',
+      unit_price: item.price,
+      resulting_quantity: (existing?.quantity ?? 0) + 1,
+    });
     return existing
       ? { items: state.items.map((cartItem) => cartItem.productId === item.productId ? { ...cartItem, quantity: cartItem.quantity + 1 } : cartItem) }
       : { items: [...state.items, { ...item, quantity: 1 }] };
@@ -40,6 +47,10 @@ export const useCartStore = create<CartStore>((set) => ({
       return quantity > 0 ? [{ ...item, quantity }] : [];
     }),
   })),
-  removeItem: (productId) => set((state) => ({ items: state.items.filter((item) => item.productId !== productId) })),
+  removeItem: (productId) => set((state) => {
+    const item = state.items.find((cartItem) => cartItem.productId === productId);
+    if (item) posthog.capture('product_removed_from_cart', { product_id: productId, quantity: item.quantity });
+    return { items: state.items.filter((cartItem) => cartItem.productId !== productId) };
+  }),
   clearCart: () => set({ items: [] }),
 }));

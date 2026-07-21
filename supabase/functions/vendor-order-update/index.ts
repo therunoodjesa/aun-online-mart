@@ -1,4 +1,5 @@
 import { admin, corsHeaders, getUser, json } from '../_shared/paystack.ts';
+import { captureServerEvent } from '../_shared/posthog.ts';
 
 type VendorOrderStatus = 'accepted' | 'preparing' | 'ready' | 'cancelled';
 type RejectReason = 'out_of_stock' | 'store_closed' | 'cannot_meet_request' | 'preparation_time' | 'other';
@@ -84,6 +85,12 @@ Deno.serve(async (request) => {
       const { error: updateError } = await db.from('order_updates').insert({ order_id: order.id, vendor_id: vendor.id, message, update_type: 'vendor' });
       if (updateError) throw new Error(updateError.message);
       const notificationId = await notifyBuyer(db, order, waitingForChoice ? `Choose a replacement from ${vendor.name}` : `Order cancelled by ${vendor.name}`, message);
+      await captureServerEvent(user.id, 'vendor_order_status_updated', {
+        order_id: order.id,
+        status: orderStatus,
+        rejection_reason: rejection.reason,
+        alternatives_count: alternatives.length,
+      });
       return json({ status: orderStatus, notification_id: notificationId, alternatives: alternatives.length });
     }
 
@@ -96,6 +103,7 @@ Deno.serve(async (request) => {
       if (updateError) throw new Error(updateError.message);
     }
     const notificationId = await notifyBuyer(db, order, copy.title(vendor.name), copy.message, copy.kind);
+    if (changed) await captureServerEvent(user.id, 'vendor_order_status_updated', { order_id: order.id, status: body.status });
     return json({ status: body.status, notification_id: notificationId, already_updated: !changed });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : 'Could not update this order.' }, 400);

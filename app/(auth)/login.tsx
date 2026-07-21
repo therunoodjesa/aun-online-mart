@@ -11,6 +11,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authstore';
 import { beginGoogleSignIn } from '../../lib/google-auth';
 import { resolveAccountHome } from '../../lib/account-route';
+import { posthog } from '../../lib/posthog';
 
 const { width } = Dimensions.get('window');
 const S = width / 430;
@@ -41,12 +42,17 @@ export default function Login() {
     });
     setLoading(false);
     if (error) {
+      posthog.captureException(error, { flow: 'password_login' });
       const invalidCredentials = /invalid login credentials|invalid credentials/i.test(error.message);
       const emailUnconfirmed = /email not confirmed|email verification/i.test(error.message);
       setLoginError(invalidCredentials ? 'That email or password is incorrect. Please try again.' : emailUnconfirmed ? 'Please confirm the verification email sent to this account, then log in again.' : error.message || 'We could not log you in right now. Please try again.');
       return;
     }
     if (data.user) {
+      posthog.identify(data.user.id, {
+        email: data.user.email ?? null,
+      });
+      posthog.capture('user_logged_in', { method: 'password' });
       await fetchProfile(data.user.id);
       router.replace(await resolveAccountHome(data.user));
     }
@@ -55,7 +61,7 @@ export default function Login() {
   const handleGoogleLogin = async () => {
     setGoogleLoading(true);
     try { await beginGoogleSignIn(); }
-    catch (error) { Alert.alert('Google sign-in failed', error instanceof Error ? error.message : 'Please try again.'); }
+    catch (error) { posthog.captureException(error, { flow: 'google_login' }); Alert.alert('Google sign-in failed', error instanceof Error ? error.message : 'Please try again.'); }
     finally { setGoogleLoading(false); }
   };
 

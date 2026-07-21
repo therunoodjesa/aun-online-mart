@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { isFavourited, toggleFavourite, type FavouriteType } from '../lib/favourites';
+import { posthog } from '../lib/posthog';
 
 type Props = {
   entityType: FavouriteType;
@@ -26,8 +27,10 @@ export function FavouriteButton({ entityType, entityId, style, onChange }: Props
     try {
       const next = await toggleFavourite(entityType, entityId);
       setSaved(next);
+      posthog.capture('favourite_updated', { entity_type: entityType, entity_id: entityId, saved: next });
       onChange?.(next);
     } catch (error) {
+      posthog.captureException(error);
       Alert.alert('Could not update favourite', error instanceof Error ? error.message : 'Please try again.');
     } finally {
       setBusy(false);

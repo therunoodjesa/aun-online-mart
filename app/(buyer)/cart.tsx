@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useCartStore } from '../../store/cartstore';
 import { supabase } from '../../lib/supabase';
 import { calculateCheckout } from '../../lib/checkout';
+import { posthog } from '../../lib/posthog';
 
 export default function CartPage() {
   const router = useRouter();
@@ -53,7 +54,7 @@ export default function CartPage() {
         <View style={styles.promo}><TextInput value={promo} onChangeText={setPromo} placeholder="Enter promo code" placeholderTextColor="#7E7E7E" style={styles.promoInput} /><TouchableOpacity style={styles.apply}><Text style={styles.applyText}>Apply</Text></TouchableOpacity></View>
         {(checkout.packagingFee > 0 || checkout.mealPlanCredit > 0) && <View style={styles.cafeteriaBreakdown}>{checkout.packagingFee > 0 && <Text style={styles.breakdownText}>Packaging · ₦{checkout.packagingFee.toLocaleString('en-NG')} ({checkout.mealCount} meal{checkout.mealCount === 1 ? '' : 's'})</Text>}{useMealPlan && <Text style={styles.credit}>Meal-plan credit · −₦{checkout.mealPlanCredit.toLocaleString('en-NG')}</Text>}</View>}
         <View style={styles.summary}><View style={styles.summaryRow}><Text style={styles.summaryText}>Subtotal ({items.reduce((sum, item) => sum + item.quantity, 0)} items)</Text><Text style={styles.summaryText}>₦ {subtotal.toLocaleString('en-NG')}</Text></View><View style={styles.summaryRow}><Text style={styles.summaryText}>Delivery fee</Text><Text style={styles.summaryText}>₦ {deliveryFee.toLocaleString('en-NG')}</Text></View><View style={styles.totalRow}><Text style={styles.totalLabel}>TOTAL</Text><Text style={styles.total}>₦ {total.toLocaleString('en-NG')}</Text></View></View>
-        <TouchableOpacity style={styles.proceed} onPress={() => { if (hasCafeteria && !hasMealPlanAccount) { router.push({ pathname: '/(buyer)/profile', params: { edit: 'true' } }); return; } if (delivery === 'dispatch') router.push({ pathname: '/(buyer)/delivery', params: { mealPlan: useMealPlan ? 'true' : 'false' } }); else router.push({ pathname: '/(buyer)/payment', params: { fulfilment: 'pickup', mealPlan: useMealPlan ? 'true' : 'false' } }); }}><Text style={styles.proceedText}>{hasCafeteria && !hasMealPlanAccount ? 'COMPLETE PROFILE DETAILS' : delivery === 'dispatch' ? 'PROCEED TO DELIVERY' : 'PROCEED TO PAYMENT'}</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.proceed} onPress={() => { if (hasCafeteria && !hasMealPlanAccount) { router.push({ pathname: '/(buyer)/profile', params: { edit: 'true' } }); return; } posthog.capture('checkout_started', { item_count: items.reduce((sum, item) => sum + item.quantity, 0), total, fulfilment: delivery, uses_meal_plan: useMealPlan }); if (delivery === 'dispatch') router.push({ pathname: '/(buyer)/delivery', params: { mealPlan: useMealPlan ? 'true' : 'false' } }); else router.push({ pathname: '/(buyer)/payment', params: { fulfilment: 'pickup', mealPlan: useMealPlan ? 'true' : 'false' } }); }}><Text style={styles.proceedText}>{hasCafeteria && !hasMealPlanAccount ? 'COMPLETE PROFILE DETAILS' : delivery === 'dispatch' ? 'PROCEED TO DELIVERY' : 'PROCEED TO PAYMENT'}</Text></TouchableOpacity>
       </>}
     </ScrollView>
   </View>;

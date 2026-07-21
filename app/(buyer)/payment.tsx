@@ -9,6 +9,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { useCartStore } from '../../store/cartstore';
 import { supabase } from '../../lib/supabase';
 import { calculateCheckout } from '../../lib/checkout';
+import { posthog } from '../../lib/posthog';
 
 type Method = 'paystack' | 'transfer';
 type PickupLocation = { id: string; name: string; pickup_location: string | null; pickup_instructions: string | null };
@@ -128,6 +129,7 @@ export default function PaymentPage() {
     setPaying(false);
     if (error || !data?.authorization_url) { setPaymentMessage(data?.error ?? error?.message ?? 'Could not start secure checkout.'); return; }
     if (data.pricing) setServerQuote(data.pricing as ServerQuote);
+    posthog.capture('payment_started', { method: 'paystack', total, item_count: itemCount, fulfilment: isPickup ? 'pickup' : 'delivery' });
     checkoutOpenedRef.current = true;
     setPaymentReference(data.reference);
     await AsyncStorage.setItem(PENDING_PAYMENT_REFERENCE, data.reference);
@@ -186,6 +188,7 @@ export default function PaymentPage() {
       setPaymentMessage(data?.error ?? error?.message ?? 'Could not submit your transfer for confirmation.');
       return;
     }
+    posthog.capture('payment_started', { method: 'bank_transfer', total, item_count: itemCount, fulfilment: isPickup ? 'pickup' : 'delivery' });
     await AsyncStorage.removeItem(PENDING_PAYMENT_REFERENCE);
     clearCart();
     router.replace({ pathname: '/(buyer)/order/[orderId]', params: { orderId: data.order_id, fulfilment: isPickup ? 'pickup' : 'delivery', address: address ?? '' } });
