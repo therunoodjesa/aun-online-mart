@@ -37,6 +37,7 @@ type Vendor = {
   is_open: boolean;
   average_prep_time: string | null;
   important_message: string | null;
+  store_type?: 'marketplace' | 'supermarket' | 'service' | null;
   products: Product[];
 };
 
@@ -77,6 +78,7 @@ export default function VendorPage() {
         is_open,
         average_prep_time,
         important_message,
+        store_type,
         products (
           id,
           name,
@@ -100,6 +102,10 @@ export default function VendorPage() {
     }
 
     const loadedVendor = data as Vendor;
+    if (loadedVendor.store_type === 'service') {
+      router.replace('/(buyer)/services');
+      return;
+    }
     loadedVendor.products = [...(loadedVendor.products ?? [])].sort((a, b) => Number(a.sort_order ?? Number.MAX_SAFE_INTEGER) - Number(b.sort_order ?? Number.MAX_SAFE_INTEGER));
     setVendor(loadedVendor);
     setIsFavourite(await isFavourited('vendor', vendorId).catch(() => false));
