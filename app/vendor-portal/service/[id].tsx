@@ -44,13 +44,15 @@ export default function ServiceEditor() {
     if (!name.trim() || !category.trim() || !price || !Number.isFinite(Number(price)) || Number(price) < 0) { Alert.alert('Check service details', 'Add a service name, category, and valid starting price.'); return; }
     setSaving(true); const { data: auth } = await supabase.auth.getUser(); const { data: vendor } = await supabase.from('vendors').select('id, store_type').eq('owner_id', auth.user?.id ?? '').maybeSingle();
     if (!vendor || vendor.store_type !== 'service') { setSaving(false); Alert.alert('Service store required', 'This catalogue is available only to approved service providers.'); return; }
-    const base = { vendor_id: vendor.id, name: name.trim(), category: category.trim(), description: description.trim() || null, starting_price: Number(price), duration_minutes: Math.max(1, Math.floor(Number(duration) || 60)), image_url: imageUrl.trim() || null, is_available: available, updated_at: new Date().toISOString() };
-    const result = isNew ? await supabase.from('services').insert(base).select('id').single() : await supabase.from('services').update(base).eq('id', id).select('id').single();
-    if (result.error || !result.data) { setSaving(false); Alert.alert('Could not save service', result.error?.message ?? 'Please try again.'); return; }
-    const serviceId = result.data.id; const valid = options.filter((option) => option.name.trim() && Number.isFinite(Number(option.price)) && Number(option.price) >= 0);
-    const existingIds = valid.map((option) => option.id).filter(Boolean) as string[];
-    if (!isNew) { const { data: existing } = await supabase.from('service_options').select('id').eq('service_id', serviceId); const removed = (existing ?? []).map((row) => row.id).filter((optionId) => !existingIds.includes(optionId)); if (removed.length) await supabase.from('service_options').delete().in('id', removed); }
-    for (const [index, option] of valid.entries()) { const payload = { service_id: serviceId, name: option.name.trim(), price: Number(option.price), duration_minutes: Math.max(1, Math.floor(Number(option.duration) || Number(duration) || 60)), is_available: option.is_available, sort_order: index + 1 }; if (option.id) await supabase.from('service_options').update(payload).eq('id', option.id); else await supabase.from('service_options').insert(payload); }
+    const valid = options.filter((option) => option.name.trim() && Number.isFinite(Number(option.price)) && Number(option.price) >= 0);
+    const { error: saveError } = await supabase.rpc('save_service_catalogue', {
+      p_service_id: isNew ? null : id,
+      p_name: name.trim(), p_category: category.trim(), p_description: description.trim(),
+      p_starting_price: Number(price), p_duration_minutes: Math.max(1, Math.floor(Number(duration) || 60)),
+      p_image_url: imageUrl.trim(), p_is_available: available,
+      p_options: valid.map((option) => ({ name: option.name.trim(), price: Number(option.price), duration_minutes: Math.max(1, Math.floor(Number(option.duration) || Number(duration) || 60)), is_available: option.is_available })),
+    });
+    if (saveError) { setSaving(false); Alert.alert('Could not save service', saveError.message); return; }
     setSaving(false); Alert.alert('Service published', `${name.trim()} now appears in Service bookings while it is available.`); router.replace('/vendor-portal');
   };
   if (loading) return <View style={styles.loading}><ActivityIndicator size="large" color="#68ECCB" /></View>;

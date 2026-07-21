@@ -9,7 +9,7 @@ import { supabase } from '../../../lib/supabase';
 
 const COLORS = { navy: '#01193D', cream: '#F8F3ED', mint: '#68ECCB', green: '#176E73', muted: '#818181', line: '#D5D5D5', pale: '#F8F8F8' } as const;
 const money = (value: number) => `₦ ${value.toLocaleString('en-NG')}`;
-const dateKey = (date: Date) => date.toISOString().slice(0, 10);
+const dateKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const sameDate = (a: Date, b: Date) => dateKey(a) === dateKey(b);
 const addMonths = (date: Date, offset: number) => new Date(date.getFullYear(), date.getMonth() + offset, 1);
 const TIME_SLOTS = [
@@ -33,6 +33,7 @@ export default function ServiceBookingPage() {
   const width = Math.min(viewportWidth, 430);
   const { addItem } = useCartStore();
   const [service, setService] = useState<BookingService | null>(null);
+  const [serviceAvailableDates, setServiceAvailableDates] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(true);
   const today = useMemo(() => new Date(), []);
   const [month, setMonth] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
@@ -41,11 +42,13 @@ export default function ServiceBookingPage() {
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [note, setNote] = useState('');
   useEffect(() => { if (!serviceId) return; void (async () => {
-    const { data: row } = await supabase.from('services').select('id, name, category, description, starting_price, image_url, duration_minutes').eq('id', serviceId).eq('is_available', true).maybeSingle();
+    const { data: row } = await supabase.from('services').select('id, vendor_id, name, category, description, starting_price, image_url, duration_minutes').eq('id', serviceId).eq('is_available', true).maybeSingle();
     if (!row) { setLoading(false); return; }
     const { data: optionRows } = await supabase.from('service_options').select('id, name, price, duration_minutes').eq('service_id', row.id).eq('is_available', true).order('sort_order').order('name');
     const options = (optionRows ?? []).map((option) => ({ id: option.id, name: option.name, duration: `${option.duration_minutes ?? row.duration_minutes ?? 60} minutes`, price: Number(option.price) }));
     const defaultOption = { id: `${row.id}-standard`, name: row.name, duration: `${row.duration_minutes ?? 60} minutes`, price: Number(row.starting_price ?? 0) };
+    const { data: schedule } = await supabase.from('vendor_schedules').select('service_available_dates').eq('vendor_id', row.vendor_id).maybeSingle();
+    setServiceAvailableDates(Array.isArray(schedule?.service_available_dates) ? schedule.service_available_dates.map(String) : []);
     setService({ id: row.id, name: row.name ?? 'Service provider', category: row.category ?? 'Service', description: row.description ?? '', price: Number(row.starting_price ?? 0), imageUrl: row.image_url ?? null, rating: 4.9, duration: `${row.duration_minutes ?? 60} mins`, options: options.length ? options : [defaultOption] });
     setSelectedOption((options[0] ?? defaultOption).id); setLoading(false);
   })(); }, [serviceId]);
@@ -53,7 +56,11 @@ export default function ServiceBookingPage() {
   if (!service) return <View style={styles.loading}><Text style={styles.loadingText}>This service is no longer available.</Text><TouchableOpacity onPress={() => router.back()} style={styles.returnButton}><Text style={styles.returnText}>Back to services</Text></TouchableOpacity></View>;
   const chosen = service.options.find((option) => option.id === selectedOption) ?? service.options[0];
   const days = calendarDays(month);
-  const isAvailable = (day: Date) => day >= new Date(today.getFullYear(), today.getMonth(), today.getDate()) && day.getDay() !== 0 && day.getDay() !== 6;
+  const isAvailable = (day: Date) => {
+    if (day < new Date(today.getFullYear(), today.getMonth(), today.getDate())) return false;
+    if (serviceAvailableDates?.length) return serviceAvailableDates.includes(dateKey(day));
+    return day.getDay() !== 0 && day.getDay() !== 6;
+  };
   const proceed = () => {
     if (!selectedDate || !selectedTime) return;
     addItem({ productId: `service:${serviceId}:${chosen.id}:${dateKey(selectedDate)}`, name: chosen.name, category: `${service.name} · ${selectedDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`, price: chosen.price, imageUrl: service.imageUrl });
