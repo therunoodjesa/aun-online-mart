@@ -31,7 +31,7 @@ const PRODUCTS: { id: string; name: string; vendor: string; price: number; icon:
 const SUPERMARKET: { label: string; image: number; slug: string }[] = [
   { label: 'All products', image: require('../../assets/images/home/all-products.png'), slug: 'all-products' }, { label: 'Baking stuff', image: require('../../assets/images/home/bakingstuff.png'), slug: 'baking-stuff' }, { label: 'Beauty & Hygiene', image: require('../../assets/images/home/skincare.png'), slug: 'beauty-hygiene' }, { label: 'Electronics', image: require('../../assets/images/home/electronics.png'), slug: 'electronics' }, { label: 'Fragrances', image: require('../../assets/images/home/category-fragrances.png'), slug: 'fragrances' }, { label: 'Groceries', image: require('../../assets/images/home/groceries.png'), slug: 'groceries' },
 ];
-type HomeVendor = { id: string; name: string; category?: string | null; average_prep_time?: string | null; banner_url?: string | null; is_open?: boolean | null };
+type HomeVendor = { id: string; name: string; category?: string | null; store_type?: 'marketplace' | 'supermarket' | 'service' | null; average_prep_time?: string | null; banner_url?: string | null; is_open?: boolean | null };
 type HomePromo = { heading: string; message: string; background_image_url: string | null; background_color: string; cta_label: string; cta_href: string };
 type SearchResult = { id: string; type: 'vendor' | 'product' | 'cafeteria-product'; title: string; subtitle: string; vendorId?: string; marketplaceCategory?: string | null; category?: string | null };
 const FALLBACK_VENDORS: HomeVendor[] = [
@@ -134,9 +134,9 @@ export default function BuyerHome() {
 
   useEffect(() => {
     const loadVendors = async () => {
-      const { data } = await supabase.from('vendors').select('id, name, category, average_prep_time, banner_url, is_open').eq('is_approved', true).limit(24);
-      const marketplaceVendors = (data ?? []).filter((vendor) => !isSupermarketVendor(vendor.category));
-      const supermarketRows = (data ?? []).filter((vendor) => isSupermarketVendor(vendor.category));
+      const { data } = await supabase.from('vendors').select('id, name, category, store_type, average_prep_time, banner_url, is_open').eq('is_approved', true).limit(24);
+      const marketplaceVendors = (data ?? []).filter((vendor) => vendor.store_type === 'marketplace' || (!vendor.store_type && !isSupermarketVendor(vendor.category)));
+      const supermarketRows = (data ?? []).filter((vendor) => vendor.store_type === 'supermarket' || (!vendor.store_type && isSupermarketVendor(vendor.category)));
       if (marketplaceVendors.length) setVendors(marketplaceVendors as HomeVendor[]);
       setSupermarketVendors(supermarketRows as HomeVendor[]);
     };

@@ -4,11 +4,10 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase';
-import { FALLBACK_SERVICE } from '../../lib/service-fallback';
 
 const COLORS = { navy: '#01193D', cream: '#F8F3ED', mint: '#68ECCB', green: '#1D9E75', muted: '#8B96A8', pale: '#E7ECF3' } as const;
 type ServiceRow = Record<string, unknown>;
-type Service = { id: string; name: string; category: string; price: number; imageUrl: string | null; available: boolean; phone: string | null };
+type Service = { id: string; name: string; category: string; price: number; imageUrl: string | null; available: boolean; phone: string | null; providerName: string | null };
 const money = (value: number) => `₦ ${Number(value || 0).toLocaleString('en-NG')}`;
 
 const normalise = (row: ServiceRow): Service => ({
@@ -19,8 +18,8 @@ const normalise = (row: ServiceRow): Service => ({
   imageUrl: typeof (row.image_url ?? row.cover_image_url ?? row.banner_url) === 'string' ? String(row.image_url ?? row.cover_image_url ?? row.banner_url) : null,
   available: row.is_available !== false && row.status !== 'unavailable' && row.status !== 'inactive',
   phone: typeof (row.phone ?? row.phone_number) === 'string' ? String(row.phone ?? row.phone_number) : null,
+  providerName: typeof row.provider_name === 'string' ? row.provider_name : null,
 });
-const fallbackCard: Service = { id: FALLBACK_SERVICE.id, name: FALLBACK_SERVICE.name, category: FALLBACK_SERVICE.description, price: FALLBACK_SERVICE.price, imageUrl: FALLBACK_SERVICE.imageUrl, available: true, phone: null };
 
 export default function ServicesPage() {
   const router = useRouter();
@@ -35,8 +34,13 @@ export default function ServicesPage() {
     let mounted = true;
     const load = async () => {
       setLoading(true);
-      const { data } = await supabase.from('services').select('*').limit(100);
-      if (mounted) { const liveServices = (data ?? []).map((row) => normalise(row as ServiceRow)); setServices(liveServices.length ? liveServices : [fallbackCard]); setLoading(false); }
+      const { data } = await supabase.from('services').select('id, vendor_id, name, category, description, starting_price, image_url, is_available, status').eq('is_available', true).order('sort_order').order('name').limit(100);
+      const rows = (data ?? []) as (ServiceRow & { vendor_id?: string | null })[];
+      const vendorIds = [...new Set(rows.map((row) => row.vendor_id).filter(Boolean))] as string[];
+      const { data: vendors } = vendorIds.length ? await supabase.from('vendors').select('id, name, is_approved, is_open').in('id', vendorIds).eq('is_approved', true) : { data: [] };
+      const vendorsById = new Map((vendors ?? []).map((vendor) => [vendor.id, vendor]));
+      const liveServices = rows.filter((row) => row.vendor_id ? vendorsById.get(String(row.vendor_id))?.is_open !== false : true).map((row) => ({ ...normalise(row), providerName: row.vendor_id ? vendorsById.get(String(row.vendor_id))?.name ?? null : null }));
+      if (mounted) { setServices(liveServices); setLoading(false); }
     };
     void load();
     return () => { mounted = false; };
@@ -68,7 +72,7 @@ export default function ServicesPage() {
       </View>}
       renderItem={({ item }) => <TouchableOpacity activeOpacity={0.88} style={[styles.card, { width: cardWidth }]} onPress={() => router.push({ pathname: '/(buyer)/services/[serviceId]', params: { serviceId: item.id } })}>
         <View style={styles.photoWrap}>{item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.photo} /> : <View style={styles.placeholder}><Ionicons name="sparkles-outline" size={42} color={COLORS.muted} /></View>}<View style={[styles.availability, !item.available && styles.unavailable]}><Text style={styles.availabilityText}>{item.available ? 'AVAILABLE' : 'UNAVAILABLE'}</Text></View></View>
-        <View style={styles.cardInfo}><Text numberOfLines={1} style={styles.name}>{item.name}</Text><Text numberOfLines={2} style={styles.category}>{item.category}</Text><View style={styles.priceRow}><Text style={styles.price}>From {money(item.price)}</Text><Ionicons name="call" size={23} color={COLORS.cream} /></View></View>
+        <View style={styles.cardInfo}><Text numberOfLines={1} style={styles.name}>{item.name}</Text><Text numberOfLines={2} style={styles.category}>{item.providerName ? `${item.providerName} · ${item.category}` : item.category}</Text><View style={styles.priceRow}><Text style={styles.price}>From {money(item.price)}</Text><Ionicons name="call" size={23} color={COLORS.cream} /></View></View>
       </TouchableOpacity>}
       ListEmptyComponent={loading ? <ActivityIndicator style={styles.loading} size="large" color={COLORS.mint} /> : <View style={styles.empty}><Ionicons name="sparkles-outline" size={38} color={COLORS.muted} /><Text style={styles.emptyTitle}>No services found</Text><Text style={styles.emptyText}>{query ? 'Try a different search.' : 'Service providers will appear here as soon as they are added.'}</Text></View>}
     />
