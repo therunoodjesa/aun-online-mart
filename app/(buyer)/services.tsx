@@ -34,7 +34,7 @@ export default function ServicesPage() {
     let mounted = true;
     const load = async () => {
       setLoading(true);
-      const { data } = await supabase.from('services').select('id, vendor_id, name, category, description, starting_price, image_url, is_available, status').eq('is_available', true).order('sort_order').order('name').limit(100);
+      const { data } = await supabase.from('services').select('id, vendor_id, name, category, description, starting_price, image_url, is_available').eq('is_available', true).order('sort_order').order('name').limit(100);
       const rows = (data ?? []) as (ServiceRow & { vendor_id?: string | null })[];
       const vendorIds = [...new Set(rows.map((row) => row.vendor_id).filter(Boolean))] as string[];
       const { data: vendors } = vendorIds.length ? await supabase.from('vendors').select('id, name, is_approved, is_open').in('id', vendorIds).eq('is_approved', true) : { data: [] };
