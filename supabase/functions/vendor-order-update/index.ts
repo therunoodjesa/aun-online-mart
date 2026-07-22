@@ -5,10 +5,15 @@ type VendorOrderStatus = 'accepted' | 'preparing' | 'ready' | 'cancelled';
 type RejectReason = 'out_of_stock' | 'store_closed' | 'cannot_meet_request' | 'preparation_time' | 'other';
 type RequestBody = { order_id?: string; status?: VendorOrderStatus; rejection?: { reason?: RejectReason; other_reason?: string; alternative_product_ids?: string[] } };
 
-const updates: Record<Exclude<VendorOrderStatus, 'cancelled'>, { title: (vendor: string) => string; message: string; kind: 'order' | 'delivery' }> = {
+const updates: Record<Exclude<VendorOrderStatus, 'cancelled'>, { title: (vendor: string) => string; message: string; kind: 'order' | 'delivery' | 'booking' }> = {
   accepted: { title: (vendor) => `Order accepted at ${vendor}`, message: 'Your order has been accepted and will be prepared shortly.', kind: 'order' },
   preparing: { title: (vendor) => `${vendor} is preparing your order`, message: 'Your order is now being prepared.', kind: 'order' },
   ready: { title: () => 'Your order is ready', message: 'Your order is packed and ready.', kind: 'delivery' },
+};
+
+const bookingUpdates: Partial<Record<VendorOrderStatus, { title: (vendor: string) => string; message: string; kind: 'booking' }>> = {
+  accepted: { title: (vendor) => `Booking accepted by ${vendor}`, message: 'Your booking has been accepted. Check your order details for the scheduled date and time.', kind: 'booking' },
+  ready: { title: () => 'Booking session complete', message: 'Your service provider has marked this booking session as complete.', kind: 'booking' },
 };
 
 const rejectionCopy: Record<RejectReason, string> = {
@@ -19,7 +24,7 @@ const rejectionCopy: Record<RejectReason, string> = {
   other: 'The vendor is unable to fulfil this order.',
 };
 
-async function notifyBuyer(db: ReturnType<typeof admin>, order: { id: string; user_id: string }, title: string, message: string, kind: 'order' | 'delivery' = 'order') {
+async function notifyBuyer(db: ReturnType<typeof admin>, order: { id: string; user_id: string }, title: string, message: string, kind: 'order' | 'delivery' | 'booking' = 'order') {
   const actionHref = `/(buyer)/order/${order.id}`;
   const { data: existing, error: existingError } = await db.from('notifications').select('id').eq('user_id', order.user_id).eq('action_href', actionHref).eq('message', message).maybeSingle();
   if (existingError) throw new Error(existingError.message);
@@ -42,7 +47,7 @@ Deno.serve(async (request) => {
     if (!body.order_id || !body.status || !['accepted', 'preparing', 'ready', 'cancelled'].includes(body.status)) return json({ error: 'Choose a valid order update.' }, 400);
 
     const db = admin();
-    const { data: vendor, error: vendorError } = await db.from('vendors').select('id, name').eq('owner_id', user.id).maybeSingle();
+    const { data: vendor, error: vendorError } = await db.from('vendors').select('id, name, store_type').eq('owner_id', user.id).maybeSingle();
     if (vendorError || !vendor) return json({ error: vendorError?.message ?? 'No vendor store is linked to this account.' }, 403);
     const { data: vendorLine, error: lineError } = await db.from('order_items').select('id, products!inner(vendor_id)').eq('order_id', body.order_id).eq('products.vendor_id', vendor.id).limit(1).maybeSingle();
     if (lineError || !vendorLine) return json({ error: lineError?.message ?? 'This order does not belong to your store.' }, 403);
@@ -69,7 +74,9 @@ Deno.serve(async (request) => {
       const waitingForChoice = alternatives.length > 0;
       const orderStatus = waitingForChoice ? 'replacement_requested' : 'cancelled';
       const reasonText = rejection.reason === 'other' ? otherReason! : rejectionCopy[rejection.reason];
-      const message = waitingForChoice
+      const message = vendor.store_type === 'service'
+        ? `${vendor.name} declined this booking. AOM will process any required refund manually.`
+        : waitingForChoice
         ? `${reasonText} ${vendor.name} has suggested alternatives for you to choose from.`
         : `${reasonText} Your order has been cancelled. AOM will process your refund manually.`;
 
@@ -84,7 +91,7 @@ Deno.serve(async (request) => {
       if (statusError) throw new Error(statusError.message);
       const { error: updateError } = await db.from('order_updates').insert({ order_id: order.id, vendor_id: vendor.id, message, update_type: 'vendor' });
       if (updateError) throw new Error(updateError.message);
-      const notificationId = await notifyBuyer(db, order, waitingForChoice ? `Choose a replacement from ${vendor.name}` : `Order cancelled by ${vendor.name}`, message);
+      const notificationId = await notifyBuyer(db, order, vendor.store_type === 'service' ? `Booking rejected by ${vendor.name}` : waitingForChoice ? `Choose a replacement from ${vendor.name}` : `Order cancelled by ${vendor.name}`, message, vendor.store_type === 'service' ? 'booking' : 'order');
       await captureServerEvent(user.id, 'vendor_order_status_updated', {
         order_id: order.id,
         status: orderStatus,
@@ -94,7 +101,7 @@ Deno.serve(async (request) => {
       return json({ status: orderStatus, notification_id: notificationId, alternatives: alternatives.length });
     }
 
-    const copy = updates[body.status];
+    const copy = vendor.store_type === 'service' ? bookingUpdates[body.status] ?? updates[body.status] : updates[body.status];
     const changed = order.status !== body.status;
     if (changed) {
       const { error: statusError } = await db.from('orders').update({ status: body.status }).eq('id', order.id);
@@ -109,4 +116,3 @@ Deno.serve(async (request) => {
     return json({ error: error instanceof Error ? error.message : 'Could not update this order.' }, 400);
   }
 });
-
