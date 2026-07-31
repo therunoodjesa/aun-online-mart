@@ -10,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { beginGoogleSignIn } from '../../lib/google-auth';
 import { posthog } from '../../lib/posthog';
+import { friendlyError } from '../../lib/user-error';
 
 const { width } = Dimensions.get('window');
 const S = width / 430;
@@ -55,7 +56,7 @@ export default function Signup() {
     setLoading(false);
     if (error) {
       posthog.captureException(error, { flow: 'password_signup', role });
-      Alert.alert('Sign up failed', error.message);
+      Alert.alert('Account not created', friendlyError(error, 'Check the details you entered and try again.'));
       return;
     }
     if (data.user) {
@@ -73,7 +74,7 @@ export default function Signup() {
   const handleGoogleSignup = async () => {
     setGoogleLoading(true);
     try { await beginGoogleSignIn(); }
-    catch (error) { posthog.captureException(error, { flow: 'google_signup', role }); Alert.alert('Google sign-in failed', error instanceof Error ? error.message : 'Please try again.'); }
+    catch (error) { posthog.captureException(error, { flow: 'google_signup', role }); Alert.alert('Google sign-up did not finish', friendlyError(error instanceof Error ? error : null, 'Close the Google window, check your internet connection, and try again.')); }
     finally { setGoogleLoading(false); }
   };
 

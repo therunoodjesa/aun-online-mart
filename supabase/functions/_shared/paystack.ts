@@ -47,7 +47,7 @@ export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delive
   if (normalised.some((item) => item.productId.startsWith('cafeteria:'))) throw new Error('Cafeteria checkout is being connected separately. Please remove cafeteria items to pay for this order.');
   const ids = [...new Set(normalised.map((item) => item.productId.slice(0, 36)))];
   const db = admin();
-  const { data: products } = await db.from('products').select('id, name, price, status, stock_quantity, marketplace_category').in('id', ids).eq('status', 'available');
+  const { data: products } = await db.from('products').select('id, vendor_id, name, price, status, stock_quantity, marketplace_category').in('id', ids).eq('status', 'available');
   if (!products || products.length !== ids.length) throw new Error('One or more items are no longer available. Please refresh your cart.');
   const requestedByProduct = new Map<string, number>();
   for (const item of normalised) {
@@ -76,6 +76,20 @@ export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delive
   });
   const subtotal = lines.reduce((total, line) => total + line.unit_price * line.quantity, 0);
   const serviceFee = Math.round(subtotal * 0.1);
+  const vendorIds = [...new Set(products.map((product) => product.vendor_id).filter(Boolean))] as string[];
+  const { data: vendorRows, error: vendorLocationError } = vendorIds.length
+    ? await db.from('vendors').select('id, operating_location').in('id', vendorIds)
+    : { data: [] as { id: string; operating_location: string | null }[], error: null };
+  // Keep unclassified or legacy vendors on the existing rate. The campus rate
+  // only applies when every product has a vendor and every represented vendor
+  // is explicitly tagged as operating on campus.
+  const allVendorsAreOnCampus = !vendorLocationError
+    && vendorIds.length > 0
+    && products.every((product) => Boolean(product.vendor_id))
+    && vendorRows?.length === vendorIds.length
+    && vendorRows.every((vendor) => vendor.operating_location === 'on_campus');
+  const campusDeliveryActive = fulfilment === 'delivery' && allVendorsAreOnCampus;
+  const campusDeliveryFee = 500;
   const marketplaceOnly = products.every((product) => Boolean(product.marketplace_category));
   const { data: activityRows } = marketplaceOnly && fulfilment === 'delivery'
     ? await db.rpc('get_marketplace_rush_hour_activity', { p_delivery_slot: deliverySlot })
@@ -83,8 +97,9 @@ export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delive
   const activity = activityRows?.[0];
   const standardDeliveryFee = Number(activity?.standard_delivery_fee ?? 2500);
   const rushDeliveryFee = Number(activity?.rush_delivery_fee ?? 1000);
-  const rushHourActive = Boolean(activity?.is_enabled) && Number(activity?.qualifying_orders ?? 0) >= Number(activity?.qualifying_threshold ?? 5);
-  const deliveryFee = fulfilment === 'pickup' ? 0 : rushHourActive ? rushDeliveryFee : standardDeliveryFee;
+  const rushHourActive = !campusDeliveryActive && Boolean(activity?.is_enabled) && Number(activity?.qualifying_orders ?? 0) >= Number(activity?.qualifying_threshold ?? 5);
+  const deliveryFee = fulfilment === 'pickup' ? 0 : campusDeliveryActive ? campusDeliveryFee : rushHourActive ? rushDeliveryFee : standardDeliveryFee;
   const rushHour = { active: rushHourActive, qualifying_orders: Number(activity?.qualifying_orders ?? 0), threshold: Number(activity?.qualifying_threshold ?? 5), standard_delivery_fee: standardDeliveryFee, discounted_delivery_fee: rushDeliveryFee, savings: rushHourActive ? Math.max(0, standardDeliveryFee - rushDeliveryFee) : 0 };
-  return { lines, subtotal, serviceFee, deliveryFee, rushHour, total: subtotal + serviceFee + deliveryFee };
+  const campusDelivery = { active: campusDeliveryActive, fee: campusDeliveryFee, qualifying_vendor_count: campusDeliveryActive ? vendorIds.length : 0 };
+  return { lines, subtotal, serviceFee, deliveryFee, campusDelivery, rushHour, total: subtotal + serviceFee + deliveryFee };
 }

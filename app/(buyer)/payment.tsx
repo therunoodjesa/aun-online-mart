@@ -10,10 +10,12 @@ import { useCartStore } from '../../store/cartstore';
 import { supabase } from '../../lib/supabase';
 import { calculateCheckout } from '../../lib/checkout';
 import { posthog } from '../../lib/posthog';
+import { getVendorAvailabilityMap } from '../../lib/vendor-availability';
+import { friendlyError } from '../../lib/user-error';
 
 type Method = 'paystack' | 'transfer';
 type PickupLocation = { id: string; name: string; pickup_location: string | null; pickup_instructions: string | null };
-type ServerQuote = { subtotal: number; serviceFee: number; deliveryFee: number; total: number; rushHour?: { active?: boolean; standard_delivery_fee?: number; discounted_delivery_fee?: number; savings?: number } };
+type ServerQuote = { subtotal: number; serviceFee: number; deliveryFee: number; total: number; campusDelivery?: { active?: boolean; fee?: number; qualifying_vendor_count?: number }; rushHour?: { active?: boolean; standard_delivery_fee?: number; discounted_delivery_fee?: number; savings?: number } };
 const PENDING_PAYMENT_REFERENCE = 'aom_pending_paystack_reference';
 const money = (value: number) => `\u20A6${value.toLocaleString('en-NG')}`;
 
@@ -62,6 +64,23 @@ export default function PaymentPage() {
   };
   const pickupTitle = pickupLocations.length === 1 ? (pickupLocations[0].pickup_location || pickupLocations[0].name) : pickupLocations.length > 1 ? 'Multiple vendor pickup locations' : 'Vendor pickup point';
   const pickupDetail = pickupLocations.length === 1 ? (pickupLocations[0].pickup_instructions || pickupLocations[0].name) : pickupLocations.length > 1 ? 'Collect each item from its listed vendor.' : 'Ready in approximately 15 minutes';
+
+  const cartVendorsAreOpen = async () => {
+    const productIds = [...new Set(items.map((item) => item.productId.split(':')[0]).filter((id) => id.length > 20))];
+    const serviceIds = [...new Set(items.filter((item) => item.productId.startsWith('service:')).map((item) => item.productId.split(':')[1]).filter(Boolean))];
+    const [{ data: products }, { data: services }] = await Promise.all([
+      productIds.length ? supabase.from('products').select('vendor_id').in('id', productIds) : Promise.resolve({ data: [] }),
+      serviceIds.length ? supabase.from('services').select('vendor_id').in('id', serviceIds) : Promise.resolve({ data: [] }),
+    ]);
+    const vendorIds = [...new Set([...(products ?? []), ...(services ?? [])].map((item) => item.vendor_id).filter(Boolean))];
+    if (!vendorIds.length) return true;
+    const { data: vendors } = await supabase.from('vendors').select('id, name, is_open').in('id', vendorIds);
+    const availability = await getVendorAvailabilityMap((vendors ?? []) as { id: string; name: string; is_open: boolean | null }[]);
+    const closed = (vendors ?? []).filter((vendor) => availability.get(vendor.id) === false).map((vendor) => vendor.name);
+    if (!closed.length) return true;
+    setPaymentMessage(`${closed.join(', ')} ${closed.length === 1 ? 'is' : 'are'} currently outside their ordering hours. Please return to your cart and try again when ${closed.length === 1 ? 'the store reopens' : 'the stores reopen'}.`);
+    return false;
+  };
 
   useEffect(() => {
     const acceptReturnedReference = (reference?: string | string[]) => {
@@ -119,6 +138,7 @@ export default function PaymentPage() {
 
   const startPaystackPayment = async () => {
     if (!items.length) return;
+    if (!(await cartVendorsAreOpen())) return;
     // A Pay tap always begins a new checkout. Any prior reference is still
     // verified automatically on return, but must not trap the buyer here.
     setPaymentReference('');
@@ -127,7 +147,7 @@ export default function PaymentPage() {
     setPaying(true); setPaymentMessage('');
     const { data, error } = await supabase.functions.invoke('paystack-initialize', { body: { items: checkoutItems, fulfilment: isPickup ? 'pickup' : 'delivery', address: address ?? null, slot: slot ?? null, callback_url: callbackUrl } });
     setPaying(false);
-    if (error || !data?.authorization_url) { setPaymentMessage(data?.error ?? error?.message ?? 'Could not start secure checkout.'); return; }
+    if (error || !data?.authorization_url) { setPaymentMessage(friendlyError(data?.error ?? error, 'Secure checkout did not open. Check your internet connection and tap Pay again. You have not been charged.')); return; }
     if (data.pricing) setServerQuote(data.pricing as ServerQuote);
     posthog.capture('payment_started', { method: 'paystack', total, item_count: itemCount, fulfilment: isPickup ? 'pickup' : 'delivery' });
     checkoutOpenedRef.current = true;
@@ -172,6 +192,7 @@ export default function PaymentPage() {
   };
   const submitBankTransfer = async () => {
     if (!items.length) return;
+    if (!(await cartVendorsAreOpen())) return;
     setSubmittingTransfer(true);
     setPaymentMessage('');
     const { data, error } = await supabase.functions.invoke('bank-transfer-submit', {
@@ -185,7 +206,7 @@ export default function PaymentPage() {
     });
     setSubmittingTransfer(false);
     if (error || data?.error || !data?.order_id) {
-      setPaymentMessage(data?.error ?? error?.message ?? 'Could not submit your transfer for confirmation.');
+      setPaymentMessage(friendlyError(data?.error ?? error, 'Your transfer notice was not sent. Check your internet connection and submit it again.'));
       return;
     }
     posthog.capture('payment_started', { method: 'bank_transfer', total, item_count: itemCount, fulfilment: isPickup ? 'pickup' : 'delivery' });
@@ -206,7 +227,7 @@ export default function PaymentPage() {
       if (!detail && context instanceof Response) {
         try { const body = await context.clone().json() as { error?: string }; detail = body.error ?? ''; } catch { /* keep the generic message */ }
       }
-      setPaymentMessage(detail || error?.message || 'Could not verify payment. Please deploy the paystack-verify function and try again.');
+      setPaymentMessage(friendlyError(detail || error, 'We could not confirm this payment yet. Do not pay again. Wait a minute, then return to this page so AOM can check it again.'));
       return;
     }
     if (data?.status !== 'paid' || !data?.order_id) { setPaymentMessage(data?.message ?? 'Your payment is still being confirmed. We will check again when you return to the app.'); return; }
@@ -246,6 +267,7 @@ export default function PaymentPage() {
     <View style={styles.header}><TouchableOpacity style={styles.back} onPress={goBack}><Ionicons name="arrow-back-outline" size={23} color="#F8F3ED" /></TouchableOpacity><Text style={styles.headerTitle}>Payment</Text><View style={styles.steps}><View style={styles.stepDone}><Ionicons name="checkmark" size={18} color="#01193D" /></View><View style={styles.stepLine} /><View style={styles.stepDone}><Ionicons name="checkmark" size={18} color="#01193D" /></View><View style={styles.stepLine} /><View style={styles.stepDone}><Ionicons name="checkmark" size={18} color="#01193D" /></View><View style={styles.stepLine} /><View style={styles.stepCurrent}><Text style={styles.stepText}>4</Text></View></View></View>
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       {paymentMessage ? <View style={styles.paymentNotice}><Text style={styles.paymentNoticeText}>{paymentMessage}</Text></View> : null}
+      {serverQuote?.campusDelivery?.active ? <View style={{ borderRadius: 10, padding: 13, backgroundColor: '#E1F5EE', flexDirection: 'row', gap: 9, alignItems: 'center' }}><Ionicons name="location-outline" size={20} color="#176E73" /><View style={{ flex: 1 }}><Text style={{ color: '#176E73', fontSize: 15, fontWeight: '800' }}>Campus delivery rate applied</Text><Text style={{ color: '#176E73', fontSize: 13, marginTop: 2 }}>Every store in this order operates on campus, so delivery is a flat {money(deliveryFee)}.</Text></View></View> : null}
       {serverQuote?.rushHour?.active ? <View style={{ borderRadius: 10, padding: 13, backgroundColor: '#E1F5EE', flexDirection: 'row', gap: 9, alignItems: 'center' }}><Ionicons name="flash-outline" size={20} color="#176E73" /><View style={{ flex: 1 }}><Text style={{ color: '#176E73', fontSize: 15, fontWeight: '800' }}>Rush Hour Deal applied</Text><Text style={{ color: '#176E73', fontSize: 13, marginTop: 2 }}>Delivery reduced from {money(Number(serverQuote.rushHour.standard_delivery_fee ?? 2500))} to {money(deliveryFee)} — you save {money(Number(serverQuote.rushHour.savings ?? 0))}.</Text></View></View> : null}
       {serviceFee > 0 && <View style={{ borderRadius: 10, padding: 13, backgroundColor: '#E1F5EE', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}><Text style={{ color: '#175E63', fontSize: 15, fontWeight: '700' }}>AOM service fee (10%)</Text><Text style={{ color: '#175E63', fontSize: 16, fontWeight: '800' }}>{money(serviceFee)}</Text></View>}
       <View style={styles.summary}><View style={styles.summaryRow}><Text style={styles.summaryLabel}>Subtotal ({itemCount} items)</Text><Text style={styles.summaryValue}>{money(subtotal)}</Text></View>{checkout.packagingFee > 0 && <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Packaging ({checkout.mealCount} meal{checkout.mealCount === 1 ? '' : 's'})</Text><Text style={styles.summaryValue}>{money(checkout.packagingFee)}</Text></View>}<View style={styles.summaryRow}><Text style={styles.summaryLabel}>Delivery fee</Text><Text style={styles.summaryValue}>{isPickup ? 'Free' : money(deliveryFee)}</Text></View>{checkout.mealPlanCredit > 0 && <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Meal-plan credit</Text><Text style={styles.discount}>- {money(checkout.mealPlanCredit)}</Text></View>}<View style={styles.totalRow}><Text style={styles.totalLabel}>Total</Text><Text style={styles.total}>{money(total)}</Text></View></View>

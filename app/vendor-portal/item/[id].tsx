@@ -5,6 +5,8 @@ import { StatusBar } from 'expo-status-bar';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../../../lib/supabase';
+import { confirmAction } from '../../../lib/confirm-action';
+import { friendlyError } from '../../../lib/user-error';
 import type { ReactNode } from 'react';
 
 type Option = { id?: string; option_group: string; name: string; price_modifier: string; is_available: boolean; selection_mode?: 'multiple' | 'single' };
@@ -43,7 +45,7 @@ export default function CatalogueItemEditor() {
     if (isNew || !id) return;
     const load = async () => {
       const { data: product, error } = await supabase.from('products').select('id, vendor_id, name, description, price, stock_quantity, category, marketplace_category, marketplace_subcategory, image_url, status').eq('id', id).single();
-      if (error || !product) { setLoadError(error?.message ?? 'This item no longer exists.'); setLoading(false); return; }
+      if (error || !product) { setLoadError(friendlyError(error, 'This item no longer exists, or it has been removed from the catalogue.')); setLoading(false); return; }
       const { data: auth } = await supabase.auth.getUser();
       const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_id', auth.user?.id ?? '').maybeSingle();
       if (!vendor || product.vendor_id !== vendor.id) { setLoadError('You can only edit products from your own store.'); setLoading(false); return; }
@@ -98,7 +100,7 @@ export default function CatalogueItemEditor() {
       const { error } = await supabase.storage.from('product-images').upload(path, await response.arrayBuffer(), { contentType: asset.mimeType ?? 'image/jpeg', upsert: false });
       if (error) throw error;
       setImageUrl(supabase.storage.from('product-images').getPublicUrl(path).data.publicUrl);
-    } catch (error) { Alert.alert('Could not upload image', error instanceof Error ? error.message : 'Please try again or paste a public image URL.'); }
+    } catch (error) { Alert.alert('Image not uploaded', friendlyError(error instanceof Error ? error : null, 'Use a JPG or PNG file, or paste a public image URL instead.')); }
     finally { setUploadingImage(false); }
   };
   const useSuggestion = (suggestion: OptionSuggestion) => setOptions((current) => {
@@ -109,9 +111,10 @@ export default function CatalogueItemEditor() {
   const save = async () => {
     if (!name.trim() || !price || Number.isNaN(Number(price)) || Number(price) < 0) { Alert.alert('Check the details', 'Add a product name and a valid price.'); return; }
     setSaving(true);
-    const { data: auth } = await supabase.auth.getUser();
-    const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_id', auth.user?.id ?? '').maybeSingle();
-    if (!vendor) { setSaving(false); Alert.alert('Store unavailable', 'Your account is not linked to a vendor store.'); return; }
+    const { data: auth, error: authError } = await supabase.auth.getUser();
+    if (authError || !auth.user) { setSaving(false); Alert.alert('Sign in again', friendlyError(authError, 'Your session has expired. Sign in again, return to Inventory, and retry.')); return; }
+    const { data: vendor, error: vendorError } = await supabase.from('vendors').select('id').eq('owner_id', auth.user.id).maybeSingle();
+    if (vendorError || !vendor) { setSaving(false); Alert.alert('Store account not linked', friendlyError(vendorError, 'This login is not linked to a vendor store. Sign out and back in. If this remains, ask AOM to link the store to this exact account.')); return; }
     const parsedStock = stockQuantity.trim() === '' ? null : Math.max(0, Math.floor(Number(stockQuantity)));
     if (stockQuantity.trim() !== '' && !Number.isFinite(parsedStock)) { setSaving(false); Alert.alert('Check the stock quantity', 'Enter a whole number that is zero or higher.'); return; }
     if (isNew && parsedStock === null) { setSaving(false); Alert.alert('Add the stock quantity', 'Enter how many units are available before adding this item to your catalogue.'); return; }
@@ -122,14 +125,14 @@ export default function CatalogueItemEditor() {
     }
     const payload = { name: name.trim(), description: description.trim() || null, price: Number(price), stock_quantity: parsedStock, category: category.trim() || null, marketplace_category: marketplaceCategory || null, marketplace_subcategory: subcategory.trim() || null, image_url: imageUrl.trim() || null, status: available ? (parsedStock === 0 ? 'sold_out' : 'available') : 'hidden', ...(isNew ? { sort_order: nextSortOrder } : {}) };
     const result = isNew ? await supabase.from('products').insert({ ...payload, vendor_id: vendor.id }).select('id').single() : await supabase.from('products').update(payload).eq('id', id).select('id').single();
-    if (result.error || !result.data) { setSaving(false); Alert.alert('Could not save item', result.error?.message ?? 'Please try again.'); return; }
+    if (result.error || !result.data) { setSaving(false); Alert.alert('Item not saved', friendlyError(result.error, 'Review the item name, price, stock, and category, then try again.')); return; }
     const productId = result.data.id;
     const placementDelete = await supabase.from('product_category_placements').delete().eq('product_id', productId);
-    if (placementDelete.error) { setSaving(false); Alert.alert('Could not save categories', placementDelete.error.message); return; }
+    if (placementDelete.error) { setSaving(false); Alert.alert('Categories not saved', friendlyError(placementDelete.error, 'The item was saved, but its extra category placement was not. Return to the item and choose the categories again.')); return; }
     const validPlacements = extraPlacements.filter((placement) => placement.category.trim()).slice(0, 2);
     if (validPlacements.length) {
       const placementInsert = await supabase.from('product_category_placements').insert(validPlacements.map((placement) => ({ product_id: productId, section: placement.section, category: placement.category })));
-      if (placementInsert.error) { setSaving(false); Alert.alert('Could not save categories', placementInsert.error.message); return; }
+      if (placementInsert.error) { setSaving(false); Alert.alert('Categories not saved', friendlyError(placementInsert.error, 'The item was saved, but its extra category placement was not. Return to the item and choose the categories again.')); return; }
     }
     const validOptions = options.filter((option) => option.name.trim() && option.option_group.trim());
     const existingIds = validOptions.map((option) => option.id).filter(Boolean) as string[];
@@ -144,28 +147,23 @@ export default function CatalogueItemEditor() {
   };
   const deleteItem = () => {
     if (isNew || !id || deleting) return;
-    Alert.alert(
-      'Delete this item?',
-      `Remove ${name.trim() || 'this item'} from your catalogue? This cannot be undone. Items already attached to an order must be hidden instead, so order history remains accurate.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete item',
-          style: 'destructive',
-          onPress: async () => {
-            setDeleting(true);
-            const { error } = await supabase.from('products').delete().eq('id', id);
-            setDeleting(false);
-            if (error) {
-              Alert.alert('Could not delete item', error.message.includes('foreign key') ? 'This item is part of an order, so it cannot be deleted. Use the availability switch to hide it instead.' : error.message);
-              return;
-            }
-            Alert.alert('Item deleted', 'The item has been removed from your catalogue.');
-            router.replace('/vendor-portal');
-          },
-        },
-      ],
-    );
+    confirmAction({
+      title: 'Delete this item?',
+      message: `Remove ${name.trim() || 'this item'} from your catalogue? This cannot be undone. Items already attached to an order must be hidden instead, so order history remains accurate.`,
+      confirmLabel: 'Delete item',
+      destructive: true,
+      onConfirm: async () => {
+        setDeleting(true);
+        const { error } = await supabase.from('products').delete().eq('id', id);
+        setDeleting(false);
+        if (error) {
+          Alert.alert('Item not deleted', friendlyError(error, 'This item may be part of an order. Hide it instead so past order records remain accurate.'));
+          return;
+        }
+        Alert.alert('Item deleted', 'The item has been removed from your catalogue.');
+        router.replace('/vendor-portal');
+      },
+    });
   };
 
   extraPlacementControls = <ExtraPlacementControls placements={extraPlacements} onChange={setExtraPlacements} />;

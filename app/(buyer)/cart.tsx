@@ -8,6 +8,8 @@ import { supabase } from '../../lib/supabase';
 import { calculateCheckout } from '../../lib/checkout';
 import { posthog } from '../../lib/posthog';
 
+type ServerQuote = { subtotal: number; serviceFee: number; deliveryFee: number; total: number; campusDelivery?: { active?: boolean } };
+
 export default function CartPage() {
   const router = useRouter();
   const { items, changeQuantity, removeItem } = useCartStore();
@@ -17,10 +19,12 @@ export default function CartPage() {
   const [useMealPlan, setUseMealPlan] = useState(false);
   const [note, setNote] = useState('');
   const [promo, setPromo] = useState('');
+  const [serverQuote, setServerQuote] = useState<ServerQuote | null>(null);
   const checkout = useMemo(() => calculateCheckout(items, delivery, useMealPlan, planCount), [items, delivery, useMealPlan, planCount]);
-  const subtotal = checkout.subtotal;
-  const deliveryFee = checkout.deliveryFee;
-  const total = checkout.total;
+  const subtotal = serverQuote?.subtotal ?? checkout.subtotal;
+  const deliveryFee = delivery === 'dispatch' ? serverQuote?.deliveryFee ?? checkout.deliveryFee : 0;
+  const serviceFee = serverQuote?.serviceFee ?? checkout.serviceFee;
+  const total = serverQuote ? subtotal + serviceFee + deliveryFee : checkout.total;
   const cafeteriaEligible = checkout.eligibleSubtotal > 0;
   const hasCafeteria = items.some((item) => item.category?.toLowerCase().startsWith('cafeteria'));
 
@@ -39,16 +43,30 @@ export default function CartPage() {
     if (hasCafeteria) setDelivery('dispatch');
   }, [hasCafeteria]);
 
+  useEffect(() => {
+    let active = true;
+    const loadQuote = async () => {
+      const canUseProductQuote = items.length > 0 && items.every((item) => !item.productId.startsWith('cafeteria:') && !item.productId.startsWith('service:'));
+      if (!canUseProductQuote) { if (active) setServerQuote(null); return; }
+      const quoteItems = items.map((item) => ({ productId: item.productId, quantity: item.quantity, selectedOptions: item.selectedOptions?.map((option) => ({ id: option.id, quantity: option.quantity })), note: item.note ?? null }));
+      const { data, error } = await supabase.functions.invoke('checkout-quote', { body: { items: quoteItems, fulfilment: 'delivery' } });
+      if (active) setServerQuote(!error && data?.pricing ? data.pricing as ServerQuote : null);
+    };
+    void loadQuote();
+    return () => { active = false; };
+  }, [items]);
+
   return <View style={styles.screen}>
     <StatusBar style="light" />
     <View style={styles.header}><TouchableOpacity style={styles.back} onPress={() => router.back()}><Ionicons name="arrow-back-outline" size={23} color="#F8F3ED" /></TouchableOpacity><Text style={styles.headerTitle}>Cart</Text><View style={styles.steps}><View style={styles.stepDone}><Ionicons name="checkmark" size={18} color="#01193D" /></View><View style={styles.stepLine} /><View style={styles.step}><Text style={styles.stepText}>2</Text></View><View style={styles.stepLine} /><View style={styles.step}><Text style={styles.stepText}>3</Text></View><View style={styles.stepLine} /><View style={styles.step}><Text style={styles.stepText}>4</Text></View></View></View>
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      {checkout.serviceFee > 0 && <View style={{ marginBottom: 14, borderRadius: 8, padding: 12, backgroundColor: '#E1F5EE', flexDirection: 'row', justifyContent: 'space-between' }}><Text style={{ color: '#175E63', fontSize: 14, fontWeight: '700' }}>AOM service fee (10%)</Text><Text style={{ color: '#175E63', fontSize: 14, fontWeight: '800' }}>₦ {checkout.serviceFee.toLocaleString('en-NG')}</Text></View>}
+      {serverQuote?.campusDelivery?.active && delivery === 'dispatch' && <View style={{ marginBottom: 14, borderRadius: 8, padding: 12, backgroundColor: '#E1F5EE', flexDirection: 'row', alignItems: 'center', gap: 9 }}><Ionicons name="location-outline" size={19} color="#175E63" /><Text style={{ flex: 1, color: '#175E63', fontSize: 14, fontWeight: '700' }}>Campus delivery · flat ₦500</Text></View>}
+      {serviceFee > 0 && <View style={{ marginBottom: 14, borderRadius: 8, padding: 12, backgroundColor: '#E1F5EE', flexDirection: 'row', justifyContent: 'space-between' }}><Text style={{ color: '#175E63', fontSize: 14, fontWeight: '700' }}>AOM service fee (10%)</Text><Text style={{ color: '#175E63', fontSize: 14, fontWeight: '800' }}>₦ {serviceFee.toLocaleString('en-NG')}</Text></View>}
       {items.length === 0 ? <View style={styles.empty}><Ionicons name="cart-outline" size={52} color="#A0A0A0" /><Text style={styles.emptyTitle}>Your cart is empty</Text><TouchableOpacity style={styles.browseButton} onPress={() => router.back()}><Text style={styles.browseText}>Browse marketplace</Text></TouchableOpacity></View> : <>
         {items.map((item, index) => <View key={item.productId} style={[styles.item, index < items.length - 1 && styles.itemDivider]}><View style={styles.itemImage}>{item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.itemImageFile} /> : <Ionicons name="restaurant-outline" size={34} color="#175E63" />}</View><View style={styles.itemCopy}><Text style={styles.itemName}>{item.name}</Text><Text style={styles.itemCategory}>{item.category || 'Marketplace'}</Text></View><View style={styles.itemActions}><TouchableOpacity onPress={() => removeItem(item.productId)}><Text style={styles.remove}>×</Text></TouchableOpacity><Text style={styles.itemPrice}>₦ {item.price.toLocaleString('en-NG')}</Text><View style={styles.quantity}><TouchableOpacity onPress={() => changeQuantity(item.productId, -1)}><Text style={styles.quantitySign}>−</Text></TouchableOpacity><Text style={styles.quantityValue}>{item.quantity}</Text><TouchableOpacity onPress={() => changeQuantity(item.productId, 1)}><Text style={styles.quantitySign}>+</Text></TouchableOpacity></View></View></View>)}
         <View style={styles.note}><Ionicons name="pencil" size={18} color="#7E7E7E" /><TextInput value={note} onChangeText={setNote} placeholder="Leave an optional note for the vendor(s)" placeholderTextColor="#7E7E7E" style={[styles.noteInput, { height: 48, paddingVertical: 0, textAlignVertical: 'center', includeFontPadding: false }]} /></View>
         <Text style={styles.sectionLabel}>DELIVERY OPTIONS</Text>
-        <TouchableOpacity onPress={() => setDelivery('dispatch')} style={[styles.deliveryOption, delivery === 'dispatch' && styles.deliveryActive]}><View style={[styles.deliveryIcon, delivery === 'dispatch' && styles.deliveryIconActive]}><Ionicons name="bicycle-outline" size={25} color={delivery === 'dispatch' ? '#FFFFFF' : '#7E7E7E'} /></View><View><Text style={[styles.deliveryTitle, delivery === 'dispatch' && styles.deliveryTitleActive]}>{hasCafeteria ? 'Room delivery' : 'Dispatch delivery'}</Text><Text style={styles.deliveryDetail}>{hasCafeteria ? 'Est. 15–40 minutes' : 'Est. 45 minutes'}</Text></View><Text style={[styles.deliveryPrice, delivery === 'dispatch' && styles.deliveryPriceActive]}>₦ {calculateCheckout(items, 'dispatch', useMealPlan, planCount).deliveryFee.toLocaleString('en-NG')}</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => setDelivery('dispatch')} style={[styles.deliveryOption, delivery === 'dispatch' && styles.deliveryActive]}><View style={[styles.deliveryIcon, delivery === 'dispatch' && styles.deliveryIconActive]}><Ionicons name="bicycle-outline" size={25} color={delivery === 'dispatch' ? '#FFFFFF' : '#7E7E7E'} /></View><View><Text style={[styles.deliveryTitle, delivery === 'dispatch' && styles.deliveryTitleActive]}>{hasCafeteria ? 'Room delivery' : 'Dispatch delivery'}</Text><Text style={styles.deliveryDetail}>{hasCafeteria ? 'Est. 15–40 minutes' : 'Est. 45 minutes'}</Text></View><Text style={[styles.deliveryPrice, delivery === 'dispatch' && styles.deliveryPriceActive]}>₦ {(serverQuote?.deliveryFee ?? calculateCheckout(items, 'dispatch', useMealPlan, planCount).deliveryFee).toLocaleString('en-NG')}</Text></TouchableOpacity>
         {!hasCafeteria && <TouchableOpacity onPress={() => setDelivery('pickup')} style={[styles.deliveryOption, delivery === 'pickup' && styles.deliveryActive]}><View style={styles.deliveryIcon}><Ionicons name="walk-outline" size={25} color="#7E7E7E" /></View><View><Text style={styles.deliveryTitle}>Pickup</Text><Text style={styles.deliveryDetail}>Ready in ~15 minutes</Text></View><Text style={styles.deliveryPrice}>Free</Text></TouchableOpacity>}
         {cafeteriaEligible && <TouchableOpacity onPress={() => setUseMealPlan((value) => !value)} style={[styles.mealPlan, useMealPlan && styles.mealPlanActive]}><Ionicons name="card-outline" size={24} color={useMealPlan ? '#005B3B' : '#7E7E7E'} /><View style={styles.mealPlanCopy}><Text style={styles.mealPlanTitle}>Use meal plan</Text><Text style={styles.mealPlanDetail}>{planCount ? `${planCount} plan${planCount === 1 ? '' : 's'} available · up to ₦${(planCount * 1800).toLocaleString('en-NG')}` : 'No meal plans available'}</Text></View><Ionicons name={useMealPlan ? 'checkmark-circle' : 'ellipse-outline'} size={24} color={useMealPlan ? '#005B3B' : '#7E7E7E'} /></TouchableOpacity>}
         <View style={styles.promo}><TextInput value={promo} onChangeText={setPromo} placeholder="Enter promo code" placeholderTextColor="#7E7E7E" style={styles.promoInput} /><TouchableOpacity style={styles.apply}><Text style={styles.applyText}>Apply</Text></TouchableOpacity></View>

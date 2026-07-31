@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { toggleFavourite, type FavouriteType } from '../../lib/favourites';
 import { useCartStore } from '../../store/cartstore';
+import { applyVendorAvailability, vendorCanAcceptOrders } from '../../lib/vendor-availability';
 
 const COLORS = { navy: '#01193D', mint: '#68ECCB', cream: '#F8F3ED', white: '#FFFFFF', muted: '#8A93A1', soft: '#E7ECF3' } as const;
 const StyleSheet = Object.assign(Object.create(NativeStyleSheet), { absoluteFillObject: NativeStyleSheet.absoluteFill }) as typeof NativeStyleSheet & { absoluteFillObject: typeof NativeStyleSheet.absoluteFill };
@@ -44,14 +45,22 @@ export default function FavouritesPage() {
     const productMap = new Map<string, SavedItem>((products ?? []).map((item: any) => [item.id, { id: item.id, entityType: 'product' as const, name: item.name, price: item.price, imageUrl: item.image_url, vendor: item.vendors?.name ?? 'Marketplace', category: item.category, vendorId: item.vendor_id, marketplaceCategory: item.marketplace_category }]));
     const cafeteriaMap = new Map<string, SavedItem>((cafeteriaProducts ?? []).map((item: any) => [item.id, { id: item.id, entityType: 'cafeteria_product' as const, name: item.name, price: item.price, imageUrl: item.image_url, vendor: 'Cafeteria', category: item.category }]));
     setItems(rows.flatMap((row) => row.entity_type === 'product' ? [productMap.get(row.entity_id)] : row.entity_type === 'cafeteria_product' ? [cafeteriaMap.get(row.entity_id)] : []).filter(Boolean) as SavedItem[]);
-    const vendorMap = new Map((vendorRows ?? []).map((item: any) => [item.id, { id: item.id, name: item.name, category: item.category, imageUrl: item.banner_url, location: item.location, isOpen: item.is_open }]));
+    const resolvedVendors = await applyVendorAvailability((vendorRows ?? []) as any[]);
+    const vendorMap = new Map(resolvedVendors.map((item: any) => [item.id, { id: item.id, name: item.name, category: item.category, imageUrl: item.banner_url, location: item.location, isOpen: item.is_open }]));
     setVendors(rows.filter((row) => row.entity_type === 'vendor').flatMap((row) => [vendorMap.get(row.entity_id)]).filter(Boolean) as SavedVendor[]);
     setLoading(false);
   };
 
   useEffect(() => { void load(); }, []);
   const remove = async (type: FavouriteType, id: string) => { try { await toggleFavourite(type, id); void load(); } catch { Alert.alert('Could not update favourite', 'Please try again in a moment.'); } };
-  const reorder = (item: SavedItem) => { addItem({ productId: item.id, name: item.name, category: item.vendor, price: item.price, imageUrl: item.imageUrl }); Alert.alert('Added to cart', `${item.name} is ready in your cart.`); };
+  const reorder = async (item: SavedItem) => {
+    if (item.vendorId && !(await vendorCanAcceptOrders(item.vendorId))) {
+      Alert.alert('Store closed', 'This vendor is outside their ordering hours. You can keep the item saved and return when the store reopens.');
+      return;
+    }
+    addItem({ productId: item.id, name: item.name, category: item.vendor, price: item.price, imageUrl: item.imageUrl });
+    Alert.alert('Added to cart', `${item.name} is ready in your cart.`);
+  };
   const openItem = (item: SavedItem) => item.entityType === 'cafeteria_product'
     ? router.push({ pathname: '/(buyer)/cafeteria/[productId]', params: { productId: item.id } })
     : item.marketplaceCategory && item.vendorId

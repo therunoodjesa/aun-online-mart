@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authstore';
 import { useCartStore } from '../../store/cartstore';
+import { applyVendorAvailability } from '../../lib/vendor-availability';
 
 const COLORS = { navy: '#01193D', mint: '#68ECCB', cream: '#F8F3ED', green: '#005B3B', muted: '#A0A0A0', white: '#FFFFFF', surface: '#FDFBFA' } as const;
 const PROMO_IMAGE = require('../../assets/images/home/jollof-promo.png');
@@ -34,10 +35,6 @@ const SUPERMARKET: { label: string; image: number; slug: string }[] = [
 type HomeVendor = { id: string; name: string; category?: string | null; store_type?: 'marketplace' | 'supermarket' | 'service' | null; average_prep_time?: string | null; banner_url?: string | null; is_open?: boolean | null };
 type HomePromo = { heading: string; message: string; background_image_url: string | null; background_color: string; cta_label: string; cta_href: string };
 type SearchResult = { id: string; type: 'vendor' | 'product' | 'cafeteria-product'; title: string; subtitle: string; vendorId?: string; marketplaceCategory?: string | null; category?: string | null };
-const FALLBACK_VENDORS: HomeVendor[] = [
-  { id: 'shollys', name: "Sholly's Restaurant", category: 'Native pot', average_prep_time: '50–80 mins' },
-];
-
 const firstName = (name: unknown) => {
   const value = typeof name === 'string' && name.trim() ? name.trim().split(/\s+/)[0] : 'there';
   return value.length > 9 ? `${value.slice(0, 8)}…` : value;
@@ -96,7 +93,7 @@ export default function BuyerHome() {
   const [activeCategory, setActiveCategory] = useState('Meals');
   const [name, setName] = useState(() => firstName(profile?.full_name));
   const [timeGreeting, setTimeGreeting] = useState(watGreeting);
-  const [vendors, setVendors] = useState<HomeVendor[]>(FALLBACK_VENDORS);
+  const [vendors, setVendors] = useState<HomeVendor[]>([]);
   const [homePromo, setHomePromo] = useState<HomePromo | null>(null);
   const [supermarketVendors, setSupermarketVendors] = useState<HomeVendor[]>([]);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
@@ -133,14 +130,19 @@ export default function BuyerHome() {
   }, []);
 
   useEffect(() => {
+    let active = true;
     const loadVendors = async () => {
       const { data } = await supabase.from('vendors').select('id, name, category, store_type, average_prep_time, banner_url, is_open').eq('is_approved', true).limit(24);
-      const marketplaceVendors = (data ?? []).filter((vendor) => vendor.store_type === 'marketplace' || (!vendor.store_type && !isSupermarketVendor(vendor.category)));
-      const supermarketRows = (data ?? []).filter((vendor) => vendor.store_type === 'supermarket' || (!vendor.store_type && isSupermarketVendor(vendor.category)));
-      if (marketplaceVendors.length) setVendors(marketplaceVendors as HomeVendor[]);
-      setSupermarketVendors(supermarketRows as HomeVendor[]);
+      const resolved = await applyVendorAvailability((data ?? []) as HomeVendor[]);
+      if (!active) return;
+      const marketplaceVendors = resolved.filter((vendor) => (vendor.store_type === 'marketplace' || (!vendor.store_type && !isSupermarketVendor(vendor.category))) && vendor.is_open !== false);
+      const supermarketRows = resolved.filter((vendor) => vendor.store_type === 'supermarket' || (!vendor.store_type && isSupermarketVendor(vendor.category)));
+      setVendors(marketplaceVendors);
+      setSupermarketVendors(supermarketRows);
     };
     void loadVendors();
+    const timer = setInterval(() => { void loadVendors(); }, 60_000);
+    return () => { active = false; clearInterval(timer); };
   }, []);
 
   useEffect(() => {

@@ -1,4 +1,5 @@
 export type ServiceOption = { id: string; name: string; duration: string; price: number };
+export type ServiceAddon = { id: string; name: string; price: number };
 
 export type BookingService = {
   id: string;
@@ -10,6 +11,7 @@ export type BookingService = {
   rating: number;
   duration: string;
   options: ServiceOption[];
+  addons: ServiceAddon[];
 };
 
 export const FALLBACK_SERVICE: BookingService = {
@@ -26,4 +28,5 @@ export const FALLBACK_SERVICE: BookingService = {
     { id: 'gel-polish-removal', name: 'Gel polish removal', duration: '10 minutes', price: 500 },
     { id: 'gel-refill', name: 'Gel refill', duration: '20 minutes', price: 3500 },
   ],
+  addons: [],
 };

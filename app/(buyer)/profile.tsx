@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase';
+import { friendlyError } from '../../lib/user-error';
 import { useAuthStore } from '../../store/authstore';
 
 type ProfileRow = { full_name: string | null; email: string | null; student_id: string | null; age: number | null; school_year: string | null };
@@ -53,10 +54,10 @@ export default function ProfilePage() {
     if (!studentId.trim() || !schoolYear.trim()) { Alert.alert('Complete your student details', 'Add your student ID and school year before saving.'); return; }
     setSaving(true);
     const { error } = await supabase.rpc('request_meal_plan', { p_full_name: name, p_age: age ? Number(age) : null, p_school_year: schoolYear, p_student_id: studentId, p_requested_plan_count: requestedPlans });
-    if (error) { setSaving(false); Alert.alert('Could not save details', 'Run the profile meal-plan migration in Supabase, then try again.'); return; }
+    if (error) { setSaving(false); Alert.alert('Profile not saved', friendlyError(error, 'Check that every required profile field is complete, then try again.')); return; }
     const { error: authError } = await supabase.auth.updateUser({ data: { full_name: name.trim() } });
     setSaving(false);
-    if (authError) { Alert.alert('Details saved', 'Your profile was saved, but your display name could not be updated yet.'); return; }
+    if (authError) { Alert.alert('Profile saved', 'Your details were saved. Your new display name may take a moment to appear; refresh the page if it does not update.'); return; }
     const current = useAuthStore.getState().profile;
     if (current) setProfile({ ...current, full_name: name.trim(), student_id: studentId.trim() || undefined });
     setMealPlan({ plan_count: mealPlan?.plan_count ?? 0, meals_used_today: mealPlan?.meals_used_today ?? 0, requested_plan_count: requestedPlans, request_status: requestedPlans ? 'pending' : 'not_requested' });

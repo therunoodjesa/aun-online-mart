@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
+import { friendlyError } from '../lib/user-error';
 
 type Role = 'manager' | 'kitchen' | 'cashier' | 'server';
 type Staff = { role: Role; is_active: boolean };
@@ -77,7 +78,7 @@ export default function CafeteriaPortal() {
   const changeStatus = async (product: Product, status: Product['status']) => {
     setProducts((items) => items.map((item) => item.id === product.id ? { ...item, status } : item));
     const { error } = await supabase.from('cafeteria_products').update({ status }).eq('id', product.id);
-    if (error) { void load(); Alert.alert('Could not update item', error.message); }
+    if (error) { void load(); Alert.alert('Item not updated', friendlyError(error, 'Refresh the menu and try changing the item again.')); }
   };
 
   const moveProduct = async (product: Product, direction: -1 | 1) => {
@@ -92,7 +93,7 @@ export default function CafeteriaPortal() {
       supabase.from('cafeteria_products').update({ sort_order: neighbourOrder }).eq('id', product.id),
       supabase.from('cafeteria_products').update({ sort_order: productOrder }).eq('id', neighbour.id),
     ]);
-    if (firstError || secondError) { void load(); Alert.alert('Could not change placement', firstError?.message ?? secondError?.message ?? 'Please try again.'); }
+    if (firstError || secondError) { void load(); Alert.alert('Placement not changed', friendlyError(firstError ?? secondError, 'Refresh the menu and move the item again.')); }
   };
 
   const chooseImage = async () => {
@@ -111,7 +112,7 @@ export default function CafeteriaPortal() {
       const { error } = await supabase.storage.from('product-images').upload(path, await response.arrayBuffer(), { contentType: asset.mimeType ?? 'image/jpeg', upsert: false });
       if (error) throw error;
       setImageUrl(supabase.storage.from('product-images').getPublicUrl(path).data.publicUrl);
-    } catch (error) { Alert.alert('Could not upload image', error instanceof Error ? error.message : 'Please try again or paste a direct image URL.'); }
+    } catch (error) { Alert.alert('Image not uploaded', friendlyError(error instanceof Error ? error : null, 'Use a JPG or PNG file, or paste a public image URL instead.')); }
     finally { setUploadingImage(false); }
   };
 
@@ -126,14 +127,14 @@ export default function CafeteriaPortal() {
     const { data: saved, error } = editingId
       ? await supabase.from('cafeteria_products').update(payload).eq('id', editingId).select('id').single()
       : await supabase.from('cafeteria_products').insert({ ...payload, status: 'available' }).select('id').single();
-    if (error || !saved) { setSaving(false); Alert.alert(`Could not ${editingId ? 'update' : 'add'} item`, error?.message ?? 'Please try again.'); return; }
+    if (error || !saved) { setSaving(false); Alert.alert(`Item not ${editingId ? 'updated' : 'added'}`, friendlyError(error, 'Review the item name, price, service period, and image, then try again.')); return; }
     if (editingId) {
       const { error: removeError } = await supabase.from('cafeteria_product_options').delete().eq('product_id', saved.id);
-      if (removeError) { setSaving(false); Alert.alert('Item saved, but choices could not be updated', removeError.message); return; }
+      if (removeError) { setSaving(false); Alert.alert('Choices not updated', friendlyError(removeError, 'The item was saved. Open it again and retry its choices.')); return; }
     }
     if (validChoices.length) {
       const { error: optionError } = await supabase.from('cafeteria_product_options').insert(validChoices.map((choice) => ({ product_id: saved.id, option_group: choiceGroup.trim(), name: choice.name.trim(), price_modifier: Number(choice.price) || 0, is_available: true, selection_mode: 'single' })));
-      if (optionError) { setSaving(false); Alert.alert('Item saved, but choices could not be added', optionError.message); return; }
+      if (optionError) { setSaving(false); Alert.alert('Choices not added', friendlyError(optionError, 'The item was saved. Open it again and retry its choices.')); return; }
     }
     setSaving(false);
     setModalOpen(false);

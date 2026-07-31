@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authstore';
 import { resolveAccountHome } from '../../lib/account-route';
+import { friendlyError } from '../../lib/user-error';
 
 export default function GoogleAuthCallback() {
   const router = useRouter();
@@ -17,7 +18,7 @@ export default function GoogleAuthCallback() {
       if (errorDescription) { setMessage(errorDescription); return; }
       if (!code) { setMessage('Google did not return a sign-in code. Please try again.'); return; }
       const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-      if (error || !data.user) { setMessage(error?.message ?? 'Could not complete Google sign-in.'); return; }
+      if (error || !data.user) { setMessage(friendlyError(error, 'Google sign-in did not finish. Return to the login page and try again.')); return; }
       await fetchProfile(data.user.id);
       router.replace(await resolveAccountHome(data.user));
     };

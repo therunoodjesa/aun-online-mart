@@ -12,6 +12,8 @@ import { useCartStore } from '../../../store/cartstore';
 import { FavouriteButton } from '../../../components/FavouriteButton';
 import { isFavourited } from '../../../lib/favourites';
 import { CartToast } from '../../../components/CartToast';
+import { getVendorAvailabilityMap } from '../../../lib/vendor-availability';
+import { friendlyError } from '../../../lib/user-error';
 
 const S = 1;
 
@@ -60,6 +62,18 @@ export default function VendorPage() {
     fetchVendor();
   }, [vendorId]);
 
+  useEffect(() => {
+    if (!vendorId) return;
+    const refreshAvailability = async () => {
+      const { data } = await supabase.from('vendors').select('id, is_open').eq('id', vendorId).maybeSingle();
+      if (!data) return;
+      const availability = await getVendorAvailabilityMap([data]);
+      setVendor((current) => current ? { ...current, is_open: availability.get(vendorId) ?? data.is_open !== false } : current);
+    };
+    const timer = setInterval(() => { void refreshAvailability(); }, 60_000);
+    return () => clearInterval(timer);
+  }, [vendorId]);
+
   const fetchVendor = async () => {
     if (!vendorId) return;
     setLoading(true);
@@ -94,10 +108,9 @@ export default function VendorPage() {
       .eq('is_approved', true)
       .single();
 
-    setLoading(false);
-
     if (error) {
-      setError('Could not load this vendor.');
+      setError(friendlyError(error, 'This store is unavailable right now. Return to Marketplace and try opening it again.'));
+      setLoading(false);
       return;
     }
 
@@ -106,9 +119,12 @@ export default function VendorPage() {
       router.replace('/(buyer)/services');
       return;
     }
+    const availability = await getVendorAvailabilityMap([loadedVendor]);
+    loadedVendor.is_open = availability.get(loadedVendor.id) ?? loadedVendor.is_open !== false;
     loadedVendor.products = [...(loadedVendor.products ?? [])].sort((a, b) => Number(a.sort_order ?? Number.MAX_SAFE_INTEGER) - Number(b.sort_order ?? Number.MAX_SAFE_INTEGER));
     setVendor(loadedVendor);
     setIsFavourite(await isFavourited('vendor', vendorId).catch(() => false));
+    setLoading(false);
   };
 
   // Derive unique categories from products
@@ -130,6 +146,10 @@ export default function VendorPage() {
 
   const updateQty = (id: string, delta: number) => {
     const product = vendor?.products.find((item) => item.id === id);
+    if (delta > 0 && vendor?.is_open === false) {
+      Alert.alert('Store closed', 'This vendor is outside their ordering hours. You can keep browsing and return when the store reopens.');
+      return;
+    }
     if (product?.status !== 'available') return;
     setQuantities(prev => ({
       ...prev,
@@ -145,6 +165,10 @@ export default function VendorPage() {
 
   const addOrCustomise = async (id: string) => {
     const product = vendor?.products.find((item) => item.id === id);
+    if (vendor?.is_open === false) {
+      Alert.alert('Store closed', 'This vendor is outside their ordering hours. You can keep browsing and return when the store reopens.');
+      return;
+    }
     if (!product || product.status !== 'available') return;
     const { data } = await supabase.from('product_options').select('id').eq('product_id', product.id).eq('is_available', true).limit(1);
     if (data?.length) {

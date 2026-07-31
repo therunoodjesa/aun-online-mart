@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Image, ImageBackground, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, ImageBackground, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../../../lib/supabase';
 import { useCartStore } from '../../../../store/cartstore';
 import { CartToast } from '../../../../components/CartToast';
+import { vendorCanAcceptOrders } from '../../../../lib/vendor-availability';
 
 type CategoryProduct = { id: string; vendor_id: string; name: string; price: number; image_url: string | null; marketplace_subcategory: string | null; category: string | null; sort_order: number | null; status: 'available' | 'sold_out' };
 type CategoryConfig = { title: string; description: string; image: number; subcategories: string[] };
@@ -63,6 +64,10 @@ export default function MarketplaceCategoryPage() {
   const openProduct = (product: CategoryProduct) => router.push({ pathname: '/(buyer)/marketplace/[vendorId]/[productId]', params: { vendorId: product.vendor_id, productId: product.id } });
   const addOrCustomise = async (product: CategoryProduct) => {
     if (product.status !== 'available') return;
+    if (!(await vendorCanAcceptOrders(product.vendor_id))) {
+      Alert.alert('Store closed', 'This vendor is outside their ordering hours. You can keep browsing and return when the store reopens.');
+      return;
+    }
     const { data } = await supabase.from('product_options').select('id').eq('product_id', product.id).eq('is_available', true).limit(1);
     if (data?.length) { openProduct(product); return; }
     updateQuantity(product, 1);

@@ -8,6 +8,7 @@ import { useCartStore } from '../../../../store/cartstore';
 import { FavouriteButton } from '../../../../components/FavouriteButton';
 import { isFavourited } from '../../../../lib/favourites';
 import { CartToast } from '../../../../components/CartToast';
+import { vendorCanAcceptOrders } from '../../../../lib/vendor-availability';
 
 type Product = { id: string; vendor_id: string; name: string; description: string | null; price: number; category: string | null; image_url: string | null; status: string };
 type ProductOption = { id: string; option_group: string; name: string; price_modifier: number; is_available: boolean; selection_mode?: 'multiple' | 'single' };
@@ -76,8 +77,12 @@ export default function MarketplaceProductPage() {
   const goBack = () => router.canGoBack() ? router.back() : router.replace('/(buyer)/');
   const changeOptionQuantity = (setQuantities: Dispatch<SetStateAction<QuantityMap>>, id: string, amount: number) => setQuantities((current) => ({ ...current, [id]: Math.max(0, (current[id] ?? 0) + amount) }));
 
-  const addToCart = () => {
+  const addToCart = async () => {
     if (!product) return;
+    if (!(await vendorCanAcceptOrders(product.vendor_id))) {
+      Alert.alert('Store closed', 'This vendor is outside their ordering hours. You can keep browsing and return when the store reopens.');
+      return;
+    }
     const selectedChoices = options.filter((item) => item.selection_mode === 'single' ? singleSelections[item.option_group] === item.id : (optionQuantities[item.id] ?? 0) > 0);
     const selection = selectedChoices.map((item) => item.selection_mode === 'single' ? item.name : `${item.name} ×${optionQuantities[item.id]}`).join(' · ') || 'No extras';
     const selectionKey = options.map((item) => `${item.id}-${item.selection_mode === 'single' ? (singleSelections[item.option_group] === item.id ? 1 : 0) : (optionQuantities[item.id] ?? 0)}`).join(':');
@@ -94,6 +99,10 @@ export default function MarketplaceProductPage() {
   };
   const openRelated = (item: Product) => router.push({ pathname: '/(buyer)/marketplace/[vendorId]/[productId]', params: { vendorId: item.vendor_id, productId: item.id } });
   const addRelated = async (item: Product) => {
+    if (!(await vendorCanAcceptOrders(item.vendor_id))) {
+      Alert.alert('Store closed', 'This vendor is outside their ordering hours. You can keep browsing and return when the store reopens.');
+      return;
+    }
     const { data } = await supabase.from('product_options').select('id').eq('product_id', item.id).eq('is_available', true).limit(1);
     if (data?.length) { openRelated(item); return; }
     addItem({ productId: item.id, name: item.name, category: vendorName, price: item.price, imageUrl: item.image_url });

@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../../lib/supabase';
+import { friendlyError } from '../../../lib/user-error';
 
 type OrderRecord = { order_number: string; status: string; delivery_type: string; created_at: string };
 type OrderUpdate = { id: string; message: string; update_type: 'system' | 'vendor'; created_at: string };
@@ -70,7 +71,7 @@ export default function OrderDetailsPage() {
     if (action === 'select' && !selectionIds.length) { setResponding(false); Alert.alert('Choose replacement items', 'Select at least one option before continuing.'); return; }
     const { data, error } = await supabase.functions.invoke('buyer-order-replacement', { body: { request_id: rejectionRequest.id, action, product_ids: selectionIds } });
     setResponding(false);
-    if (error || data?.error) { Alert.alert('Could not update order', data?.error ?? error?.message ?? 'Please try again.'); return; }
+    if (error || data?.error) { Alert.alert('Response not sent', friendlyError(data?.error ?? error, 'Check your internet connection, refresh the tracking page, and submit your choice again.')); return; }
     if (action === 'select') {
       const selected = rejectionRequest.alternative_products.filter((product) => selectionIds.includes(product.id));
       const selectedNames = selected.map((product) => product.name).join(', ') || 'a replacement';

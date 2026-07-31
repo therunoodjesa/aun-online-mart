@@ -8,6 +8,7 @@ import { useCartStore } from '../../../../store/cartstore';
 import { FavouriteButton } from '../../../../components/FavouriteButton';
 import { isFavourited } from '../../../../lib/favourites';
 import { CartToast } from '../../../../components/CartToast';
+import { vendorCanAcceptOrders } from '../../../../lib/vendor-availability';
 
 const COLORS = { navy: '#01193D', mint: '#68ECCB', cream: '#F8F3ED', white: '#FFFFFF', muted: '#8793A5', line: '#D7DEE8' } as const;
 const FALLBACK_IMAGE = require('../../../../assets/images/home/all-products.png');
@@ -67,8 +68,12 @@ export default function SupermarketProductPage() {
   const unitPrice = (product?.price ?? 0) + (selectedOption?.price_modifier ?? 0);
   const total = unitPrice * quantity;
   const goBack = () => router.canGoBack() ? router.back() : router.replace({ pathname: '/(buyer)/supermarket/[category]', params: { category: category || 'all-products' } });
-  const addToCart = () => {
+  const addToCart = async () => {
     if (!product) return;
+    if (product.vendor_id && !(await vendorCanAcceptOrders(product.vendor_id))) {
+      Alert.alert('Store closed', 'This vendor is outside their ordering hours. You can keep browsing and return when the store reopens.');
+      return;
+    }
     const variant = selectedOption ? ` · ${selectedOption.name}` : '';
     for (let item = 0; item < quantity; item += 1) {
       addItem({
