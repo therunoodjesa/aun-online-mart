@@ -12,6 +12,7 @@ import { CartToast } from '../../../components/CartToast';
 const CAFETERIA_FALLBACK = require('../../../assets/images/home/jollof-promo.png');
 type Product = { id: string; name: string; description: string | null; category: string; price: number; image_url: string | null; status: 'available' | 'sold_out' | 'hidden'; meal_plan_eligible: boolean };
 type ProductOption = { id: string; option_group: string; name: string; price_modifier: number; is_available: boolean; selection_mode: 'single' };
+type CafeteriaSettings = { is_accepting_orders: boolean; snacks_open: boolean; lunch_open: boolean; dinner_open: boolean; customer_notice: string | null };
 const price = (amount: number) => `₦${amount.toLocaleString('en-NG')}`;
 
 export default function CafeteriaProductPage() {
@@ -28,15 +29,20 @@ export default function CafeteriaProductPage() {
   const [heroImageFailed, setHeroImageFailed] = useState(false);
   const [favourite, setFavourite] = useState(false);
   const [cartToast, setCartToast] = useState('');
+  const [settings, setSettings] = useState<CafeteriaSettings>({ is_accepting_orders: true, snacks_open: true, lunch_open: true, dinner_open: true, customer_notice: null });
 
   useEffect(() => {
     let active = true;
     const load = async () => {
       if (!productId) return;
       setLoading(true);
-      const { data } = await supabase.from('cafeteria_products').select('id, name, description, category, categories, sort_order, price, image_url, status, meal_plan_eligible').eq('id', productId).single();
+      const [{ data }, { data: settingRow }] = await Promise.all([
+        supabase.from('cafeteria_products').select('id, name, description, category, categories, sort_order, price, image_url, status, meal_plan_eligible').eq('id', productId).single(),
+        supabase.from('cafeteria_settings').select('is_accepting_orders, snacks_open, lunch_open, dinner_open, customer_notice').eq('id', true).maybeSingle(),
+      ]);
       if (!active) return;
       setProduct((data as Product | null) ?? null);
+      if (settingRow) setSettings(settingRow as CafeteriaSettings);
       const { data: optionData } = await supabase.from('cafeteria_product_options').select('id, option_group, name, price_modifier, is_available, selection_mode').eq('product_id', productId).eq('is_available', true);
       const { data: relatedRows } = data ? await supabase.from('cafeteria_products').select('id, name, description, category, categories, sort_order, price, image_url, status, meal_plan_eligible').contains('categories', [(data as Product).category]).eq('status', 'available').neq('id', productId).order('sort_order').limit(4) : { data: [] };
       if (active) { setOptions((optionData ?? []) as ProductOption[]); setRelated((relatedRows ?? []) as Product[]); setFavourite(await isFavourited('cafeteria_product', productId).catch(() => false)); setLoading(false); }
@@ -49,12 +55,13 @@ export default function CafeteriaProductPage() {
   const selectedOptions = useMemo(() => options.filter((option) => selections[option.option_group.trim() || 'Options'] === option.id), [options, selections]);
   const unitPrice = (product?.price ?? 0) + selectedOptions.reduce((total, option) => total + option.price_modifier, 0);
   const total = unitPrice * quantity;
+  const serviceOpen = Boolean(product && settings.is_accepting_orders && settings[`${product.category}_open` as keyof CafeteriaSettings]);
   const goBack = () => router.canGoBack() ? router.back() : router.replace('/(buyer)/cafeteria');
   const addToCart = () => {
-    if (!product) return;
+    if (!product || !serviceOpen || product.status !== 'available') return;
     const choices = selectedOptions.map((option) => option.name).join(' · ') || 'No extras';
     const key = `${product.id}:${selectedOptions.map((option) => option.id).join(':') || 'none'}:${note.trim() || 'no-note'}`;
-    for (let index = 0; index < quantity; index += 1) addItem({ productId: `cafeteria:${key}`, name: `${product.name} · ${choices}`, category: `Cafeteria · ${product.category}`, price: unitPrice, imageUrl: product.image_url, mealPlanEligible: product.meal_plan_eligible });
+    for (let index = 0; index < quantity; index += 1) addItem({ productId: `cafeteria:${key}`, name: `${product.name} · ${choices}`, category: `Cafeteria · ${product.category}`, price: unitPrice, imageUrl: product.image_url, mealPlanEligible: product.meal_plan_eligible, selectedOptions: selectedOptions.map((option) => ({ id: option.id, name: option.name, quantity: 1, priceModifier: option.price_modifier })), note: note.trim() || null });
     setCartToast('added');
   };
   const openRelated = (item: Product) => router.push({ pathname: '/(buyer)/cafeteria/[productId]', params: { productId: item.id } });
@@ -65,14 +72,14 @@ export default function CafeteriaProductPage() {
   return <View style={styles.screen}><StatusBar style="light" />
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={styles.hero}><Image source={product.image_url && !heroImageFailed ? { uri: product.image_url } : CAFETERIA_FALLBACK} onError={() => setHeroImageFailed(true)} style={styles.heroImage} /><View style={styles.heroShade} /><TouchableOpacity onPress={goBack} style={styles.back} accessibilityLabel="Go back"><Ionicons name="arrow-back-outline" size={24} color="#F8F3ED" /></TouchableOpacity><FavouriteButton entityType="cafeteria_product" entityId={product.id} style={styles.heart} /></View>
-      <View style={styles.details}><Text style={styles.title}>{product.name}</Text><View style={styles.rating}><Ionicons name="star" size={18} color="#D7B300" /><Text style={styles.ratingNumber}>4.9</Text><Text style={styles.orders}>(0 orders)</Text></View>{product.description?.trim() ? <Text style={styles.description}>{product.description}</Text> : null}
+      <View style={styles.details}><Text style={styles.title}>{product.name}</Text><View style={styles.rating}><Ionicons name="star" size={18} color="#D7B300" /><Text style={styles.ratingNumber}>4.9</Text><Text style={styles.orders}>(0 orders)</Text></View>{product.description?.trim() ? <Text style={styles.description}>{product.description}</Text> : null}{!serviceOpen ? <View style={{ marginTop: 16, borderRadius: 11, backgroundColor: '#FFF0D1', padding: 13, flexDirection: 'row', alignItems: 'center', gap: 9 }}><Ionicons name="time-outline" size={21} color="#805E15" /><Text style={{ flex: 1, color: '#805E15', fontSize: 14, lineHeight: 19, fontWeight: '700' }}>{settings.customer_notice || `${product.category[0].toUpperCase() + product.category.slice(1)} ordering is closed right now.`}</Text></View> : null}
         {optionGroups.length > 0 ? optionGroups.map(([group, groupChoices]) => <View key={group}><Text style={styles.sectionLabel}>CHOOSE ONE {group.toUpperCase()}</Text><View style={styles.optionList}>{groupChoices.map((choice) => { const selected = selections[group] === choice.id; return <TouchableOpacity key={choice.id} style={[styles.optionRow, selected && styles.optionActive]} onPress={() => setSelections((current) => ({ ...current, [group]: selected ? '' : choice.id }))}><Text style={styles.optionName}>{choice.name}</Text><View style={styles.optionRight}><Text style={styles.optionPrice}>{choice.price_modifier ? `+${price(choice.price_modifier)}` : 'Included'}</Text><View style={[styles.radio, selected && styles.radioActive]}>{selected && <Ionicons name="checkmark" size={13} color="#F8F3ED" />}</View></View></TouchableOpacity>; })}</View></View>) : <View style={styles.readyCard}><Ionicons name="restaurant-outline" size={22} color="#00695A" /><Text style={styles.readyText}>This item is ready to order. Adjust the quantity below and add it to your cart.</Text></View>}
         <Text style={styles.sectionLabel}>SPECIAL INSTRUCTIONS</Text><View style={styles.noteBox}><Ionicons name="pencil" size={19} color="#7E7E7E" /><TextInput value={note} onChangeText={setNote} placeholder="Write any special request for the cafeteria" placeholderTextColor="#7E7E7E" style={[styles.noteInput, { height: 54, paddingVertical: 0, textAlignVertical: 'center', includeFontPadding: false }]} /></View>
         {related.length > 0 && <View style={sleek.relatedSection}><Text style={sleek.relatedTitle}>Customers also liked</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={sleek.relatedRow}>{related.map((item) => <TouchableOpacity key={item.id} style={sleek.relatedCard} onPress={() => openRelated(item)}><Image source={item.image_url ? { uri: item.image_url } : CAFETERIA_FALLBACK} style={sleek.relatedImage} /><Text numberOfLines={1} style={sleek.relatedName}>{item.name}</Text><Text style={sleek.relatedPrice}>{price(item.price)}</Text></TouchableOpacity>)}</ScrollView></View>}
       </View>
     </ScrollView>
     <CartToast visible={Boolean(cartToast)} message={cartToast} onDismiss={() => setCartToast('')} />
-    <View style={styles.bottomBar}><View style={styles.quantity}><TouchableOpacity style={styles.quantityButton} onPress={() => setQuantity((value) => Math.max(1, value - 1))}><Ionicons name="remove" size={17} color="#68ECCB" /></TouchableOpacity><Text style={styles.quantityText}>{quantity}</Text><TouchableOpacity style={styles.quantityButton} onPress={() => setQuantity((value) => value + 1)}><Ionicons name="add" size={17} color="#68ECCB" /></TouchableOpacity></View><TouchableOpacity style={styles.addButton} onPress={addToCart} disabled={product.status !== 'available'}><Ionicons name="cart" size={20} color="#F8F3ED" /><Text style={styles.addText}>{product.status === 'available' ? `Add to cart · ${price(total)}` : 'Sold out'}</Text></TouchableOpacity></View>
+    <View style={styles.bottomBar}><View style={styles.quantity}><TouchableOpacity style={styles.quantityButton} onPress={() => setQuantity((value) => Math.max(1, value - 1))}><Ionicons name="remove" size={17} color="#68ECCB" /></TouchableOpacity><Text style={styles.quantityText}>{quantity}</Text><TouchableOpacity style={styles.quantityButton} onPress={() => setQuantity((value) => value + 1)}><Ionicons name="add" size={17} color="#68ECCB" /></TouchableOpacity></View><TouchableOpacity style={[styles.addButton, (!serviceOpen || product.status !== 'available') && { opacity: 0.6 }]} onPress={addToCart} disabled={!serviceOpen || product.status !== 'available'}><Ionicons name="cart" size={20} color="#F8F3ED" /><Text style={styles.addText}>{!serviceOpen ? 'Ordering closed' : product.status === 'available' ? `Add to cart · ${price(total)}` : 'Sold out'}</Text></TouchableOpacity></View>
   </View>;
 }
 
