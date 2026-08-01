@@ -1,22 +1,27 @@
 import { admin, corsHeaders, json } from '../_shared/paystack.ts';
 
 const hex = (bytes: ArrayBuffer) => Array.from(new Uint8Array(bytes)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
-type StoredLine = { product_id: string; product_name: string; unit_price: number; quantity: number; selected_options?: unknown[]; note?: string | null };
+type StoredLine = { source?: 'marketplace' | 'cafeteria'; product_id: string | null; cafeteria_product_id?: string | null; product_name: string; unit_price: number; quantity: number; selected_options?: unknown[]; note?: string | null; meal_plan_credit?: number; packaging_fee?: number };
 type StoredCart = { lines?: StoredLine[]; subtotal?: number; total?: number; deliveryFee?: number; rushHour?: { savings?: number } };
 
 async function ensureOrderItems(db: ReturnType<typeof admin>, orderId: string, lines: StoredLine[]) {
+  const marketplaceLines = lines.filter((line) => line.source !== 'cafeteria');
+  const cafeteriaLines = lines.filter((line) => line.source === 'cafeteria');
   const { count, error: countError } = await db.from('order_items').select('id', { count: 'exact', head: true }).eq('order_id', orderId);
   if (countError) throw new Error(countError.message);
-  if ((count ?? 0) > 0) return;
-  const { error } = await db.from('order_items').insert(lines.map((line) => ({
+  const { error } = marketplaceLines.length && (count ?? 0) === 0 ? await db.from('order_items').insert(marketplaceLines.map((line) => ({
     order_id: orderId, product_id: line.product_id, product_name: line.product_name,
     unit_price: line.unit_price, quantity: line.quantity, total_price: Number(line.unit_price) * Number(line.quantity),
     options: line.selected_options ?? [], notes: line.note ?? null,
-  })));
+  }))) : { error: null };
   if (error) throw new Error(error.message);
+  const { count: cafeteriaCount, error: cafeteriaCountError } = await db.from('cafeteria_order_items').select('id', { count: 'exact', head: true }).eq('order_id', orderId);
+  if (cafeteriaCountError) throw new Error(cafeteriaCountError.message);
+  const { error: cafeteriaError } = cafeteriaLines.length && (cafeteriaCount ?? 0) === 0 ? await db.from('cafeteria_order_items').insert(cafeteriaLines.map((line) => ({ order_id: orderId, product_id: line.cafeteria_product_id, product_name: line.product_name, unit_price: line.unit_price, quantity: line.quantity, options: line.selected_options ?? [], notes: line.note ?? null, meal_plan_credit: Number(line.meal_plan_credit ?? 0), packaging_fee: Number(line.packaging_fee ?? 0) }))) : { error: null };
+  if (cafeteriaError) throw new Error(cafeteriaError.message);
 }
 
-async function finalisePaidIntent(db: ReturnType<typeof admin>, intent: { id: string; user_id: string; reference: string; order_id: string | null; fulfilment: string; delivery_address: string | null; delivery_slot: string | null; cart: StoredCart }, transactionId: number) {
+async function finalisePaidIntent(db: ReturnType<typeof admin>, intent: { id: string; user_id: string; reference: string; order_id: string | null; fulfilment: string; delivery_address: string | null; delivery_instructions: string | null; delivery_slot: string | null; cart: StoredCart }, transactionId: number) {
   const lines = intent.cart?.lines ?? [];
   if (!lines.length) throw new Error('The paid transaction has no order items.');
   let orderId = intent.order_id;
@@ -32,7 +37,7 @@ async function finalisePaidIntent(db: ReturnType<typeof admin>, intent: { id: st
       order_number: `AOM-${String(Date.now()).slice(-7)}`,
       user_id: intent.user_id, status: 'pending', delivery_type: intent.fulfilment,
       payment_status: 'pending', payment_reference: intent.reference, amount_paid: total,
-      subtotal, total, delivery_fee: Number(intent.cart.deliveryFee ?? 0), rush_hour_discount: Number(intent.cart.rushHour?.savings ?? 0), delivery_address: intent.delivery_address, delivery_slot: intent.delivery_slot,
+      subtotal, total, delivery_fee: Number(intent.cart.deliveryFee ?? 0), rush_hour_discount: Number(intent.cart.rushHour?.savings ?? 0), delivery_address: intent.delivery_address, delivery_instructions: intent.delivery_instructions, delivery_slot: intent.delivery_slot,
     }).select('id').single();
     if (error || !order) {
       const { data: duplicate } = await db.from('orders').select('id').eq('payment_reference', intent.reference).maybeSingle();
@@ -87,7 +92,7 @@ Deno.serve(async (request) => {
     // `amount` may include a Paystack fee passed to the customer. The invoice
     // is represented by requested_amount; never accept a partial charge.
     if (!intent || requestedAmount !== expectedAmount || chargedAmount < expectedAmount || currency !== 'NGN') return json({ received: true });
-    const orderId = await finalisePaidIntent(db, intent as typeof intent & { user_id: string; fulfilment: string; delivery_address: string | null; delivery_slot: string | null; cart: StoredCart }, Number(transaction.id));
+    const orderId = await finalisePaidIntent(db, intent as typeof intent & { user_id: string; fulfilment: string; delivery_address: string | null; delivery_instructions: string | null; delivery_slot: string | null; cart: StoredCart }, Number(transaction.id));
     await startPaidOrderMessages(orderId);
     return json({ received: true, order_id: orderId });
   } catch (error) { return json({ error: error instanceof Error ? error.message : 'Webhook error' }, 400); }

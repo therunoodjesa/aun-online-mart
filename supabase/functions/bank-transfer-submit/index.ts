@@ -10,7 +10,7 @@ Deno.serve(async (request) => {
     if (body.confirmed !== true) return json({ error: 'Confirm that you completed the bank transfer.' }, 400);
 
     const fulfilment = body.fulfilment === 'pickup' ? 'pickup' : 'delivery';
-    const priced = await priceCart(body.items ?? [], fulfilment, typeof body.slot === 'string' ? body.slot : null);
+    const priced = await priceCart(body.items ?? [], fulfilment, typeof body.slot === 'string' ? body.slot : null, user.id, body.use_meal_plan === true);
     const reference = `aom_transfer_${crypto.randomUUID().replaceAll('-', '')}`;
     const orderNumber = `AOM-${String(Date.now()).slice(-7)}`;
     const db = admin();
@@ -18,6 +18,7 @@ Deno.serve(async (request) => {
     const { data: intent, error: intentError } = await db.from('payment_intents').insert({
       user_id: user.id, reference, amount_kobo: Math.round(priced.total * 100), status: 'pending',
       payment_channel: 'bank_transfer', fulfilment, delivery_address: body.address ?? null,
+      delivery_instructions: body.delivery_instructions ?? null,
       delivery_slot: body.slot ?? null, cart: { ...priced, fulfilment },
     }).select('id').single();
     if (intentError || !intent) throw new Error(intentError?.message ?? 'Could not record your transfer.');
@@ -29,16 +30,20 @@ Deno.serve(async (request) => {
       total: priced.total,
       delivery_fee: priced.deliveryFee,
       rush_hour_discount: priced.rushHour.savings,
-      delivery_address: body.address ?? null, delivery_slot: body.slot ?? null,
+      delivery_address: body.address ?? null, delivery_instructions: body.delivery_instructions ?? null, delivery_slot: body.slot ?? null,
     }).select('id').single();
     if (orderError || !order) throw new Error(orderError?.message ?? 'Could not create your pending order.');
 
-    const { error: itemError } = await db.from('order_items').insert(priced.lines.map((line) => ({
+    const marketplaceLines = priced.lines.filter((line) => line.source === 'marketplace');
+    const cafeteriaLines = priced.lines.filter((line) => line.source === 'cafeteria');
+    const { error: itemError } = marketplaceLines.length ? await db.from('order_items').insert(marketplaceLines.map((line) => ({
       order_id: order.id, product_id: line.product_id, product_name: line.product_name,
       unit_price: line.unit_price, quantity: line.quantity, total_price: line.unit_price * line.quantity,
       options: line.selected_options, notes: line.note,
-    })));
+    }))) : { error: null };
     if (itemError) throw new Error(itemError.message);
+    const { error: cafeteriaItemError } = cafeteriaLines.length ? await db.from('cafeteria_order_items').insert(cafeteriaLines.map((line) => ({ order_id: order.id, product_id: line.cafeteria_product_id, product_name: line.product_name, unit_price: line.unit_price, quantity: line.quantity, options: line.selected_options, notes: line.note, meal_plan_credit: line.meal_plan_credit, packaging_fee: line.packaging_fee }))) : { error: null };
+    if (cafeteriaItemError) throw new Error(cafeteriaItemError.message);
     await db.from('order_updates').insert({ order_id: order.id, message: 'Bank transfer submitted and awaiting payment confirmation', update_type: 'system' });
     await db.from('payment_intents').update({ order_id: order.id }).eq('id', intent.id);
     await captureServerEvent(user.id, 'bank_transfer_submitted', {

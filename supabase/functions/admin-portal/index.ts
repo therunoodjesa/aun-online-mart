@@ -25,12 +25,12 @@ async function dashboard(db: ReturnType<typeof admin>) {
     db.from('orders').select('*', { count: 'exact', head: true }).eq('payment_status', 'paid'),
     db.from('vendor_payout_requests').select('*', { count: 'exact', head: true }).in('status', ['requested', 'processing']),
     db.from('orders').select('*', { count: 'exact', head: true }).eq('payment_status', 'paid').in('status', ['ready', 'out_for_delivery']),
-    db.from('payment_intents').select('id, reference, amount_kobo, order_id, delivery_address, fulfilment, created_at').eq('payment_channel', 'bank_transfer').eq('status', 'pending').order('created_at', { ascending: false }).limit(25),
+    db.from('payment_intents').select('id, reference, amount_kobo, order_id, delivery_address, delivery_instructions, fulfilment, created_at').eq('payment_channel', 'bank_transfer').eq('status', 'pending').order('created_at', { ascending: false }).limit(25),
     db.from('vendor_applications').select('id, store_name, contact_name, phone, store_type, operating_location, category, address, pickup_location, created_at').eq('status', 'pending').order('created_at', { ascending: false }).limit(25),
     db.from('vendor_payout_requests').select('id, vendor_id, amount, status, requested_at, processed_at, reference, note').in('status', ['requested', 'processing']).order('requested_at', { ascending: true }).limit(50),
-    db.from('orders').select('id, order_number, status, delivery_type, delivery_address, delivery_slot, rider_name, rider_phone, rider_assigned_at, dispatch_status, created_at').eq('payment_status', 'paid').in('status', ['ready', 'out_for_delivery']).order('created_at', { ascending: true }).limit(50),
+    db.from('orders').select('id, order_number, status, delivery_type, delivery_address, delivery_instructions, delivery_slot, rider_name, rider_phone, rider_assigned_at, dispatch_status, created_at').eq('payment_status', 'paid').in('status', ['ready', 'out_for_delivery']).order('created_at', { ascending: true }).limit(50),
     db.from('delivery_riders').select('id, full_name, phone, accepts_calls, accepts_whatsapp, coverage_area, availability').eq('availability', 'active').order('full_name'),
-    db.from('orders').select('id, order_number, status, payment_status, delivery_type, delivery_address, delivery_slot, total, amount_paid, created_at').order('created_at', { ascending: false }).limit(100),
+    db.from('orders').select('id, order_number, status, payment_status, delivery_type, delivery_address, delivery_instructions, delivery_slot, total, amount_paid, created_at').order('created_at', { ascending: false }).limit(100),
     db.from('orders').select('id, total, created_at').eq('payment_status', 'paid').order('created_at', { ascending: false }).limit(1000),
     db.from('vendors').select('id', { count: 'exact', head: true }),
   ]);
@@ -131,10 +131,10 @@ async function dashboard(db: ReturnType<typeof admin>) {
 
   return {
     metrics: { pending_transfers: pendingTransferCount ?? 0, pending_vendor_applications: pendingVendorCount ?? 0, paid_orders: paidOrderCount ?? 0, pending_payouts: pendingPayoutCount ?? 0, dispatch_queue: dispatchCount ?? 0, gross_sales: grossSales, sales_last_30_days: salesLast30Days, average_order_value: (salesOrders ?? []).length ? Math.round(grossSales / (salesOrders ?? []).length) : 0, partner_vendors: vendorCount ?? 0, top_vendors: topVendors },
-    pending_transfers: (intents ?? []).map((intent) => ({ ...intent, order: intent.order_id ? orderById.get(intent.order_id) ?? null : null })),
+    pending_transfers: (intents ?? []).map((intent) => ({ ...intent, delivery_address: [intent.delivery_address, intent.delivery_instructions].filter(Boolean).join(' · ') || null, order: intent.order_id ? orderById.get(intent.order_id) ?? null : null })),
     pending_vendor_applications: applications ?? [],
     pending_payouts: (payoutRows ?? []).map((payout) => ({ ...payout, vendor: vendorById.get(payout.vendor_id) ?? null })),
-    dispatch_queue: dispatchRows ?? [],
+    dispatch_queue: (dispatchRows ?? []).map((order) => ({ ...order, delivery_address: [order.delivery_address, order.delivery_instructions].filter(Boolean).join(' · ') || null })),
     delivery_riders: riderRows ?? [],
     orders: adminOrders,
     home_promo: homePromo,
@@ -166,7 +166,10 @@ async function assignDispatch(db: ReturnType<typeof admin>, orderId: string, rid
   const { data: order, error } = await db.from('orders').select('id, order_number, user_id, status').eq('id', orderId).eq('payment_status', 'paid').maybeSingle();
   if (error || !order) throw new Error(error?.message ?? 'Order not found.');
   if (!['ready', 'out_for_delivery'].includes(order.status)) throw new Error('Only a vendor-ready order can be assigned to a rider.');
-  const { error: updateError } = await db.from('orders').update({ rider_name: riderName.trim(), rider_phone: riderPhone.trim(), rider_assigned_at: new Date().toISOString(), dispatch_status: 'assigned' }).eq('id', order.id);
+  const normalisedPhone = riderPhone.replace(/\D/g, '');
+  const { data: directory } = await db.from('delivery_riders').select('id, phone').eq('availability', 'active');
+  const riderId = (directory ?? []).find((rider) => String(rider.phone).replace(/\D/g, '') === normalisedPhone)?.id ?? null;
+  const { error: updateError } = await db.from('orders').update({ rider_id: riderId, rider_name: riderName.trim(), rider_phone: riderPhone.trim(), rider_assigned_at: new Date().toISOString(), dispatch_status: 'assigned' }).eq('id', order.id);
   if (updateError) throw new Error(updateError.message);
   await notifyDispatch(db, order, 'A rider has been assigned', `AOM has assigned ${riderName.trim()} to order #${order.order_number}. They will contact you if needed.`);
   return { status: 'assigned' };
@@ -199,14 +202,15 @@ async function updatePayout(db: ReturnType<typeof admin>, payoutId: string, stat
   return { status, reference: values.reference ?? null };
 }
 
-type StoredCartLine = { product_id: string; product_name: string; unit_price: number; quantity: number; selected_options?: unknown[]; note?: string | null };
+type StoredCartLine = { source?: 'marketplace' | 'cafeteria'; product_id: string | null; cafeteria_product_id?: string | null; product_name: string; unit_price: number; quantity: number; selected_options?: unknown[]; note?: string | null; meal_plan_credit?: number; packaging_fee?: number };
 type StoredCart = { lines?: StoredCartLine[]; subtotal?: number; total?: number; deliveryFee?: number; rushHour?: { savings?: number } };
 
 async function ensureOrderItems(db: ReturnType<typeof admin>, orderId: string, lines: StoredCartLine[]) {
+  const marketplaceLines = lines.filter((line) => line.source !== 'cafeteria' && Boolean(line.product_id));
+  const cafeteriaLines = lines.filter((line) => line.source === 'cafeteria' && Boolean(line.cafeteria_product_id));
   const { count, error: countError } = await db.from('order_items').select('id', { count: 'exact', head: true }).eq('order_id', orderId);
   if (countError) throw new Error(countError.message);
-  if ((count ?? 0) > 0) return;
-  const { error: itemError } = await db.from('order_items').insert(lines.map((line) => ({
+  const { error: itemError } = marketplaceLines.length && (count ?? 0) === 0 ? await db.from('order_items').insert(marketplaceLines.map((line) => ({
     order_id: orderId,
     product_id: line.product_id,
     product_name: line.product_name,
@@ -215,11 +219,19 @@ async function ensureOrderItems(db: ReturnType<typeof admin>, orderId: string, l
     total_price: Number(line.unit_price) * Number(line.quantity),
     options: line.selected_options ?? [],
     notes: line.note ?? null,
-  })));
+  }))) : { error: null };
   if (itemError) throw new Error(itemError.message);
+  const { count: cafeteriaCount, error: cafeteriaCountError } = await db.from('cafeteria_order_items').select('id', { count: 'exact', head: true }).eq('order_id', orderId);
+  if (cafeteriaCountError) throw new Error(cafeteriaCountError.message);
+  const { error: cafeteriaError } = cafeteriaLines.length && (cafeteriaCount ?? 0) === 0 ? await db.from('cafeteria_order_items').insert(cafeteriaLines.map((line) => ({
+    order_id: orderId, product_id: line.cafeteria_product_id, product_name: line.product_name,
+    unit_price: line.unit_price, quantity: line.quantity, options: line.selected_options ?? [], notes: line.note ?? null,
+    meal_plan_credit: Number(line.meal_plan_credit ?? 0), packaging_fee: Number(line.packaging_fee ?? 0),
+  }))) : { error: null };
+  if (cafeteriaError) throw new Error(cafeteriaError.message);
 }
 
-async function restoreLinkedOrder(db: ReturnType<typeof admin>, intent: { id: string; reference: string; order_id: string | null; user_id: string; fulfilment: string; delivery_address: string | null; delivery_slot: string | null; cart: StoredCart }) {
+async function restoreLinkedOrder(db: ReturnType<typeof admin>, intent: { id: string; reference: string; order_id: string | null; user_id: string; fulfilment: string; delivery_address: string | null; delivery_instructions: string | null; delivery_slot: string | null; cart: StoredCart }) {
   const lines = intent.cart?.lines ?? [];
   if (!lines.length) throw new Error('This transfer has no saved order items and cannot be confirmed safely.');
   if (intent.order_id) {
@@ -248,6 +260,7 @@ async function restoreLinkedOrder(db: ReturnType<typeof admin>, intent: { id: st
     delivery_fee: Number(intent.cart?.deliveryFee ?? 0),
     rush_hour_discount: Number(intent.cart?.rushHour?.savings ?? 0),
     delivery_address: intent.delivery_address,
+    delivery_instructions: intent.delivery_instructions,
     delivery_slot: intent.delivery_slot,
   }).select('id').single();
   if (orderError || !order) throw new Error(orderError?.message ?? 'Could not restore this pending order.');
@@ -260,12 +273,12 @@ async function restoreLinkedOrder(db: ReturnType<typeof admin>, intent: { id: st
 
 async function confirmTransfer(db: ReturnType<typeof admin>, intentId: string) {
   const { data: intent, error: intentError } = await db.from('payment_intents')
-    .select('id, reference, order_id, amount_kobo, status, payment_channel, user_id, fulfilment, delivery_address, delivery_slot, cart')
+    .select('id, reference, order_id, amount_kobo, status, payment_channel, user_id, fulfilment, delivery_address, delivery_instructions, delivery_slot, cart')
     .eq('id', intentId)
     .maybeSingle();
   if (intentError || !intent) throw new Error(intentError?.message ?? 'Transfer record not found.');
   if (intent.payment_channel !== 'bank_transfer') throw new Error('This payment is not a bank transfer.');
-  intent.order_id = await restoreLinkedOrder(db, intent as typeof intent & { user_id: string; fulfilment: string; delivery_address: string | null; delivery_slot: string | null; cart: StoredCart });
+  intent.order_id = await restoreLinkedOrder(db, intent as typeof intent & { user_id: string; fulfilment: string; delivery_address: string | null; delivery_instructions: string | null; delivery_slot: string | null; cart: StoredCart });
   if (intent.status === 'paid') return { order_id: intent.order_id, already_confirmed: true };
   if (intent.status !== 'pending') throw new Error(`This transfer cannot be confirmed while it is ${intent.status}.`);
 

@@ -8,7 +8,7 @@ import { supabase } from '../../lib/supabase';
 import { calculateCheckout } from '../../lib/checkout';
 import { posthog } from '../../lib/posthog';
 
-type ServerQuote = { subtotal: number; serviceFee: number; deliveryFee: number; total: number; campusDelivery?: { active?: boolean } };
+type ServerQuote = { subtotal: number; serviceFee: number; packagingFee: number; mealPlanCredit: number; deliveryFee: number; total: number; campusDelivery?: { active?: boolean } };
 
 export default function CartPage() {
   const router = useRouter();
@@ -24,7 +24,9 @@ export default function CartPage() {
   const subtotal = serverQuote?.subtotal ?? checkout.subtotal;
   const deliveryFee = delivery === 'dispatch' ? serverQuote?.deliveryFee ?? checkout.deliveryFee : 0;
   const serviceFee = serverQuote?.serviceFee ?? checkout.serviceFee;
-  const total = serverQuote ? subtotal + serviceFee + deliveryFee : checkout.total;
+  const packagingFee = serverQuote?.packagingFee ?? checkout.packagingFee;
+  const mealPlanCredit = serverQuote?.mealPlanCredit ?? checkout.mealPlanCredit;
+  const total = serverQuote?.total ?? checkout.total;
   const cafeteriaEligible = checkout.eligibleSubtotal > 0;
   const hasCafeteria = items.some((item) => item.category?.toLowerCase().startsWith('cafeteria'));
 
@@ -46,15 +48,15 @@ export default function CartPage() {
   useEffect(() => {
     let active = true;
     const loadQuote = async () => {
-      const canUseProductQuote = items.length > 0 && items.every((item) => !item.productId.startsWith('cafeteria:') && !item.productId.startsWith('service:'));
+      const canUseProductQuote = items.length > 0 && items.every((item) => !item.productId.startsWith('service:'));
       if (!canUseProductQuote) { if (active) setServerQuote(null); return; }
       const quoteItems = items.map((item) => ({ productId: item.productId, quantity: item.quantity, selectedOptions: item.selectedOptions?.map((option) => ({ id: option.id, quantity: option.quantity })), note: item.note ?? null }));
-      const { data, error } = await supabase.functions.invoke('checkout-quote', { body: { items: quoteItems, fulfilment: 'delivery' } });
+      const { data, error } = await supabase.functions.invoke('checkout-quote', { body: { items: quoteItems, fulfilment: delivery === 'pickup' ? 'pickup' : 'delivery', use_meal_plan: useMealPlan } });
       if (active) setServerQuote(!error && data?.pricing ? data.pricing as ServerQuote : null);
     };
     void loadQuote();
     return () => { active = false; };
-  }, [items]);
+  }, [items, delivery, useMealPlan]);
 
   return <View style={styles.screen}>
     <StatusBar style="light" />
@@ -70,8 +72,8 @@ export default function CartPage() {
         {!hasCafeteria && <TouchableOpacity onPress={() => setDelivery('pickup')} style={[styles.deliveryOption, delivery === 'pickup' && styles.deliveryActive]}><View style={styles.deliveryIcon}><Ionicons name="walk-outline" size={25} color="#7E7E7E" /></View><View><Text style={styles.deliveryTitle}>Pickup</Text><Text style={styles.deliveryDetail}>Ready in ~15 minutes</Text></View><Text style={styles.deliveryPrice}>Free</Text></TouchableOpacity>}
         {cafeteriaEligible && <TouchableOpacity onPress={() => setUseMealPlan((value) => !value)} style={[styles.mealPlan, useMealPlan && styles.mealPlanActive]}><Ionicons name="card-outline" size={24} color={useMealPlan ? '#005B3B' : '#7E7E7E'} /><View style={styles.mealPlanCopy}><Text style={styles.mealPlanTitle}>Use meal plan</Text><Text style={styles.mealPlanDetail}>{planCount ? `${planCount} plan${planCount === 1 ? '' : 's'} available · up to ₦${(planCount * 1800).toLocaleString('en-NG')}` : 'No meal plans available'}</Text></View><Ionicons name={useMealPlan ? 'checkmark-circle' : 'ellipse-outline'} size={24} color={useMealPlan ? '#005B3B' : '#7E7E7E'} /></TouchableOpacity>}
         <View style={styles.promo}><TextInput value={promo} onChangeText={setPromo} placeholder="Enter promo code" placeholderTextColor="#7E7E7E" style={styles.promoInput} /><TouchableOpacity style={styles.apply}><Text style={styles.applyText}>Apply</Text></TouchableOpacity></View>
-        {(checkout.packagingFee > 0 || checkout.mealPlanCredit > 0) && <View style={styles.cafeteriaBreakdown}>{checkout.packagingFee > 0 && <Text style={styles.breakdownText}>Packaging · ₦{checkout.packagingFee.toLocaleString('en-NG')} ({checkout.mealCount} meal{checkout.mealCount === 1 ? '' : 's'})</Text>}{useMealPlan && <Text style={styles.credit}>Meal-plan credit · −₦{checkout.mealPlanCredit.toLocaleString('en-NG')}</Text>}</View>}
-        <View style={styles.summary}><View style={styles.summaryRow}><Text style={styles.summaryText}>Subtotal ({items.reduce((sum, item) => sum + item.quantity, 0)} items)</Text><Text style={styles.summaryText}>₦ {subtotal.toLocaleString('en-NG')}</Text></View><View style={styles.summaryRow}><Text style={styles.summaryText}>Delivery fee</Text><Text style={styles.summaryText}>₦ {deliveryFee.toLocaleString('en-NG')}</Text></View><View style={styles.totalRow}><Text style={styles.totalLabel}>TOTAL</Text><Text style={styles.total}>₦ {total.toLocaleString('en-NG')}</Text></View></View>
+        {(packagingFee > 0 || mealPlanCredit > 0) && <View style={styles.cafeteriaBreakdown}>{packagingFee > 0 && <Text style={styles.breakdownText}>Packaging · ₦{packagingFee.toLocaleString('en-NG')} ({checkout.mealCount} meal{checkout.mealCount === 1 ? '' : 's'})</Text>}{useMealPlan && mealPlanCredit > 0 && <Text style={styles.credit}>Meal-plan credit applied · −₦{mealPlanCredit.toLocaleString('en-NG')}</Text>}</View>}
+        <View style={styles.summary}><View style={styles.summaryRow}><Text style={styles.summaryText}>Items subtotal ({items.reduce((sum, item) => sum + item.quantity, 0)} items)</Text><Text style={styles.summaryText}>₦ {subtotal.toLocaleString('en-NG')}</Text></View>{packagingFee > 0 && <View style={styles.summaryRow}><Text style={styles.summaryText}>Packaging</Text><Text style={styles.summaryText}>₦ {packagingFee.toLocaleString('en-NG')}</Text></View>}{mealPlanCredit > 0 && <View style={styles.summaryRow}><Text style={styles.credit}>Meal-plan credit</Text><Text style={styles.credit}>−₦ {mealPlanCredit.toLocaleString('en-NG')}</Text></View>}<View style={styles.summaryRow}><Text style={styles.summaryText}>Delivery fee</Text><Text style={styles.summaryText}>₦ {deliveryFee.toLocaleString('en-NG')}</Text></View><View style={styles.totalRow}><Text style={styles.totalLabel}>AMOUNT TO PAY</Text><Text style={styles.total}>₦ {total.toLocaleString('en-NG')}</Text></View></View>
         <TouchableOpacity style={styles.proceed} onPress={() => { if (hasCafeteria && !hasMealPlanAccount) { router.push({ pathname: '/(buyer)/profile', params: { edit: 'true' } }); return; } posthog.capture('checkout_started', { item_count: items.reduce((sum, item) => sum + item.quantity, 0), total, fulfilment: delivery, uses_meal_plan: useMealPlan }); if (delivery === 'dispatch') router.push({ pathname: '/(buyer)/delivery', params: { mealPlan: useMealPlan ? 'true' : 'false' } }); else router.push({ pathname: '/(buyer)/payment', params: { fulfilment: 'pickup', mealPlan: useMealPlan ? 'true' : 'false' } }); }}><Text style={styles.proceedText}>{hasCafeteria && !hasMealPlanAccount ? 'COMPLETE PROFILE DETAILS' : delivery === 'dispatch' ? 'PROCEED TO DELIVERY' : 'PROCEED TO PAYMENT'}</Text></TouchableOpacity>
       </>}
     </ScrollView>

@@ -27,7 +27,18 @@ export async function paystack(path: string, init?: RequestInit) {
   return body.data;
 }
 
-export type CheckoutLine = { product_id: string; product_name: string; unit_price: number; quantity: number; selected_options: unknown[]; note: string | null };
+export type CheckoutLine = {
+  source: 'marketplace' | 'cafeteria';
+  product_id: string | null;
+  cafeteria_product_id: string | null;
+  product_name: string;
+  unit_price: number;
+  quantity: number;
+  selected_options: unknown[];
+  note: string | null;
+  meal_plan_credit: number;
+  packaging_fee: number;
+};
 type RawCheckoutOption = { id: string; quantity?: number };
 type RawCheckoutItem = { productId: string; quantity: number; selectedOptions?: RawCheckoutOption[]; note?: string | null };
 
@@ -41,25 +52,47 @@ function legacyOptionSelections(productId: string): RawCheckoutOption[] {
   return bareOption ? [{ id: bareOption, quantity: 1 }] : [];
 }
 
-export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delivery' | 'pickup' = 'delivery', deliverySlot: string | null = null) {
+export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delivery' | 'pickup' = 'delivery', deliverySlot: string | null = null, userId: string | null = null, useMealPlan = false) {
   const normalised = rawItems.map((item) => ({ ...item, productId: String(item.productId) })).filter((item) => item.quantity > 0 && item.quantity <= 25);
   if (!normalised.length) throw new Error('Your cart is empty.');
-  if (normalised.some((item) => item.productId.startsWith('cafeteria:'))) throw new Error('Cafeteria checkout is being connected separately. Please remove cafeteria items to pay for this order.');
-  const ids = [...new Set(normalised.map((item) => item.productId.slice(0, 36)))];
+  if (normalised.some((item) => item.productId.startsWith('service:'))) throw new Error('Service bookings must be checked out separately from products.');
+  const marketplaceItems = normalised.filter((item) => !item.productId.startsWith('cafeteria:'));
+  const cafeteriaItems = normalised.filter((item) => item.productId.startsWith('cafeteria:'));
+  const ids = [...new Set(marketplaceItems.map((item) => item.productId.slice(0, 36)))];
+  const cafeteriaIds = [...new Set(cafeteriaItems.map((item) => item.productId.slice('cafeteria:'.length, 'cafeteria:'.length + 36)))];
   const db = admin();
-  const { data: products } = await db.from('products').select('id, vendor_id, name, price, status, stock_quantity, marketplace_category').in('id', ids).eq('status', 'available');
-  if (!products || products.length !== ids.length) throw new Error('One or more items are no longer available. Please refresh your cart.');
+  const [{ data: products }, { data: cafeteriaProducts }, { data: cafeteriaSettings }] = await Promise.all([
+    ids.length ? db.from('products').select('id, vendor_id, name, price, status, stock_quantity, marketplace_category').in('id', ids).eq('status', 'available') : Promise.resolve({ data: [] }),
+    cafeteriaIds.length ? db.from('cafeteria_products').select('id, name, price, status, stock_quantity, category, categories, meal_plan_eligible').in('id', cafeteriaIds).eq('status', 'available') : Promise.resolve({ data: [] }),
+    cafeteriaIds.length ? db.from('cafeteria_settings').select('is_accepting_orders, snacks_open, lunch_open, dinner_open').eq('id', true).maybeSingle() : Promise.resolve({ data: null }),
+  ]);
+  if (!products || products.length !== ids.length || !cafeteriaProducts || cafeteriaProducts.length !== cafeteriaIds.length) throw new Error('One or more items are no longer available. Please refresh your cart.');
+  if (cafeteriaIds.length && cafeteriaSettings?.is_accepting_orders === false) throw new Error('Cafeteria ordering is temporarily paused. Please remove those items or try again later.');
+  for (const product of cafeteriaProducts ?? []) {
+    const categories = Array.isArray(product.categories) && product.categories.length ? product.categories : [product.category];
+    if (!categories.some((category: string) => cafeteriaSettings?.[`${category}_open`] !== false)) throw new Error(`${product.name} is outside its cafeteria ordering period right now.`);
+  }
   const requestedByProduct = new Map<string, number>();
-  for (const item of normalised) {
+  for (const item of marketplaceItems) {
     const productId = item.productId.slice(0, 36);
     requestedByProduct.set(productId, (requestedByProduct.get(productId) ?? 0) + Math.floor(item.quantity));
   }
   const shortProduct = products.find((product) => product.stock_quantity !== null && Number(product.stock_quantity) < (requestedByProduct.get(product.id) ?? 0));
   if (shortProduct) throw new Error(`${shortProduct.name} does not have enough stock for this order. Please adjust your cart.`);
-  const { data: options } = await db.from('product_options').select('id, product_id, name, price_modifier, is_available').in('product_id', ids).eq('is_available', true);
+  const cafeteriaRequested = new Map<string, number>();
+  for (const item of cafeteriaItems) {
+    const productId = item.productId.slice('cafeteria:'.length, 'cafeteria:'.length + 36);
+    cafeteriaRequested.set(productId, (cafeteriaRequested.get(productId) ?? 0) + Math.floor(item.quantity));
+  }
+  const shortCafeteriaProduct = cafeteriaProducts.find((product) => product.stock_quantity !== null && Number(product.stock_quantity) < (cafeteriaRequested.get(product.id) ?? 0));
+  if (shortCafeteriaProduct) throw new Error(`${shortCafeteriaProduct.name} does not have enough stock for this order. Please adjust your cart.`);
+  const [{ data: options }, { data: cafeteriaOptions }] = await Promise.all([
+    ids.length ? db.from('product_options').select('id, product_id, name, price_modifier, is_available').in('product_id', ids).eq('is_available', true) : Promise.resolve({ data: [] }),
+    cafeteriaIds.length ? db.from('cafeteria_product_options').select('id, product_id, option_group, name, price_modifier, is_available').in('product_id', cafeteriaIds).eq('is_available', true) : Promise.resolve({ data: [] }),
+  ]);
   const byId = new Map(products.map((product) => [product.id, product]));
   const optionsById = new Map((options ?? []).map((option) => [option.id, option]));
-  const lines: CheckoutLine[] = normalised.map((item) => {
+  const regularLines: CheckoutLine[] = marketplaceItems.map((item) => {
     const productId = item.productId.slice(0, 36);
     const product = byId.get(productId)!;
     const requestedOptions = Array.isArray(item.selectedOptions) ? item.selectedOptions : legacyOptionSelections(item.productId);
@@ -72,10 +105,50 @@ export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delive
       selected.push({ id: option.id, name: option.name, quantity, price_modifier: Number(option.price_modifier) });
     }
     const unitPrice = Number(product.price) + selected.reduce((total, option) => total + option.price_modifier * option.quantity, 0);
-    return { product_id: product.id, product_name: product.name, unit_price: unitPrice, quantity: Math.floor(item.quantity), selected_options: selected, note: typeof item.note === 'string' && item.note.trim() ? item.note.trim().slice(0, 500) : null };
+    return { source: 'marketplace', product_id: product.id, cafeteria_product_id: null, product_name: product.name, unit_price: unitPrice, quantity: Math.floor(item.quantity), selected_options: selected, note: typeof item.note === 'string' && item.note.trim() ? item.note.trim().slice(0, 500) : null, meal_plan_credit: 0, packaging_fee: 0 };
   });
+  const cafeteriaById = new Map(cafeteriaProducts.map((product) => [product.id, product]));
+  const cafeteriaOptionsById = new Map((cafeteriaOptions ?? []).map((option) => [option.id, option]));
+  const cafeteriaLines: CheckoutLine[] = cafeteriaItems.map((item) => {
+    const productId = item.productId.slice('cafeteria:'.length, 'cafeteria:'.length + 36);
+    const product = cafeteriaById.get(productId)!;
+    const legacyId = item.productId.slice('cafeteria:'.length);
+    const requestedOptions = Array.isArray(item.selectedOptions) && item.selectedOptions.length ? item.selectedOptions : legacyOptionSelections(legacyId);
+    const selected: { id: string; group: string; name: string; quantity: number; price_modifier: number }[] = [];
+    for (const selection of requestedOptions) {
+      const option = cafeteriaOptionsById.get(String(selection.id));
+      const quantity = Math.max(0, Math.floor(Number(selection.quantity ?? 1)));
+      if (quantity <= 0) continue;
+      if (!option || option.product_id !== product.id) throw new Error(`A selected option for ${product.name} is no longer available. Please reopen the item and choose again.`);
+      selected.push({ id: option.id, group: option.option_group, name: option.name, quantity, price_modifier: Number(option.price_modifier) });
+    }
+    const unitPrice = Number(product.price) + selected.reduce((total, option) => total + option.price_modifier * option.quantity, 0);
+    const categories = Array.isArray(product.categories) && product.categories.length ? product.categories : [product.category];
+    const isMeal = categories.includes('lunch') || categories.includes('dinner');
+    return { source: 'cafeteria', product_id: null, cafeteria_product_id: product.id, product_name: product.name, unit_price: unitPrice, quantity: Math.floor(item.quantity), selected_options: selected, note: typeof item.note === 'string' && item.note.trim() ? item.note.trim().slice(0, 500) : null, meal_plan_credit: 0, packaging_fee: isMeal ? 200 * Math.floor(item.quantity) : 0, meal_plan_eligible: Boolean(product.meal_plan_eligible) } as CheckoutLine & { meal_plan_eligible: boolean };
+  });
+  let remainingMealPlanCredit = 0;
+  if (useMealPlan && userId && cafeteriaLines.length) {
+    const { data: account } = await db.from('meal_plan_accounts').select('plan_count, meals_used_today, last_used_on').eq('user_id', userId).maybeSingle();
+    if (account) {
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Lagos' });
+      const usedToday = account.last_used_on === today ? Number(account.meals_used_today ?? 0) : 0;
+      remainingMealPlanCredit = Math.max(0, Number(account.plan_count ?? 0) - usedToday) * 1800;
+    }
+  }
+  for (const line of cafeteriaLines as (CheckoutLine & { meal_plan_eligible?: boolean })[]) {
+    if (!line.meal_plan_eligible || remainingMealPlanCredit <= 0) continue;
+    const credit = Math.min(line.unit_price * line.quantity, remainingMealPlanCredit);
+    line.meal_plan_credit = credit;
+    remainingMealPlanCredit -= credit;
+    delete line.meal_plan_eligible;
+  }
+  const lines = [...regularLines, ...cafeteriaLines];
   const subtotal = lines.reduce((total, line) => total + line.unit_price * line.quantity, 0);
-  const serviceFee = Math.round(subtotal * 0.1);
+  const marketplaceSubtotal = regularLines.reduce((total, line) => total + line.unit_price * line.quantity, 0);
+  const serviceFee = Math.round(marketplaceSubtotal * 0.1);
+  const packagingFee = cafeteriaLines.reduce((total, line) => total + line.packaging_fee, 0);
+  const mealPlanCredit = cafeteriaLines.reduce((total, line) => total + line.meal_plan_credit, 0);
   const vendorIds = [...new Set(products.map((product) => product.vendor_id).filter(Boolean))] as string[];
   const { data: vendorRows, error: vendorLocationError } = vendorIds.length
     ? await db.from('vendors').select('id, operating_location').in('id', vendorIds)
@@ -98,8 +171,9 @@ export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delive
   const standardDeliveryFee = Number(activity?.standard_delivery_fee ?? 2500);
   const rushDeliveryFee = Number(activity?.rush_delivery_fee ?? 1000);
   const rushHourActive = !campusDeliveryActive && Boolean(activity?.is_enabled) && Number(activity?.qualifying_orders ?? 0) >= Number(activity?.qualifying_threshold ?? 5);
-  const deliveryFee = fulfilment === 'pickup' ? 0 : campusDeliveryActive ? campusDeliveryFee : rushHourActive ? rushDeliveryFee : standardDeliveryFee;
+  const cafeteriaOnly = cafeteriaLines.length > 0 && regularLines.length === 0;
+  const deliveryFee = fulfilment === 'pickup' ? 0 : cafeteriaOnly ? 800 : campusDeliveryActive ? campusDeliveryFee : rushHourActive ? rushDeliveryFee : standardDeliveryFee;
   const rushHour = { active: rushHourActive, qualifying_orders: Number(activity?.qualifying_orders ?? 0), threshold: Number(activity?.qualifying_threshold ?? 5), standard_delivery_fee: standardDeliveryFee, discounted_delivery_fee: rushDeliveryFee, savings: rushHourActive ? Math.max(0, standardDeliveryFee - rushDeliveryFee) : 0 };
   const campusDelivery = { active: campusDeliveryActive, fee: campusDeliveryFee, qualifying_vendor_count: campusDeliveryActive ? vendorIds.length : 0 };
-  return { lines, subtotal, serviceFee, deliveryFee, campusDelivery, rushHour, total: subtotal + serviceFee + deliveryFee };
+  return { lines, subtotal, serviceFee, packagingFee, mealPlanCredit, deliveryFee, campusDelivery, rushHour, total: subtotal + serviceFee + packagingFee + deliveryFee - mealPlanCredit };
 }

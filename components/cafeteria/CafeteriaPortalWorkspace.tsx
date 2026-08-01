@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Linking,
   Modal,
   ScrollView,
   StyleSheet,
@@ -21,7 +22,7 @@ import { friendlyError } from '../../lib/user-error';
 import { confirmAction } from '../../lib/confirm-action';
 
 type Role = 'manager' | 'kitchen' | 'cashier' | 'server';
-type Section = 'overview' | 'menu' | 'orders' | 'report' | 'settings';
+type Section = 'overview' | 'menu' | 'orders' | 'dispatch' | 'report' | 'settings';
 type Category = 'snacks' | 'lunch' | 'dinner';
 type Status = 'available' | 'sold_out' | 'hidden';
 type Staff = { role: Role; is_active: boolean };
@@ -54,8 +55,14 @@ type OrderRow = {
   payment_status: string;
   total: number | null;
   delivery_address: string | null;
+  delivery_instructions: string | null;
   delivery_slot: string | null;
   delivery_type: string | null;
+  rider_id: string | null;
+  rider_name: string | null;
+  rider_phone: string | null;
+  rider_assigned_at: string | null;
+  dispatch_status: string | null;
   created_at: string;
 };
 type OrderItem = {
@@ -70,6 +77,20 @@ type OrderItem = {
   packaging_fee: number;
 };
 type CafeteriaOrder = OrderRow & { items: OrderItem[] };
+type WalkingAgent = {
+  rider_id: string;
+  full_name: string;
+  phone: string;
+  current_zone: string | null;
+  campus_zones: string[];
+  max_orders_per_run: number;
+  active_orders: number;
+  runs_today: number;
+  schedule_added: boolean;
+  recommendation_score: number;
+};
+type Rider = { id: string; full_name: string; phone: string; walking_status: string; campus_zones: string[]; max_orders_per_run: number };
+type RiderSchedule = { id: string; rider_id: string; day_of_week: number; starts_at: string; ends_at: string; is_active: boolean };
 
 const periods: Category[] = ['snacks', 'lunch', 'dinner'];
 const roleNames: Record<Role, string> = {
@@ -123,12 +144,13 @@ export default function CafeteriaPortalWorkspace() {
     if (!orderIds.length) { setOrders([]); return; }
     const { data: orderRows } = await supabase
       .from('orders')
-      .select('id, order_number, status, payment_status, total, delivery_address, delivery_slot, delivery_type, created_at')
+      .select('id, order_number, status, payment_status, total, delivery_address, delivery_instructions, delivery_slot, delivery_type, rider_id, rider_name, rider_phone, rider_assigned_at, dispatch_status, created_at')
       .in('id', orderIds)
       .eq('payment_status', 'paid')
       .order('created_at', { ascending: false });
     setOrders(((orderRows ?? []) as OrderRow[]).map((order) => ({
       ...order,
+      delivery_address: [order.delivery_address, order.delivery_instructions].filter(Boolean).join(' · ') || null,
       items: (lines ?? []).filter((line) => line.order_id === order.id) as OrderItem[],
     })));
   }, []);
@@ -181,6 +203,7 @@ export default function CafeteriaPortalWorkspace() {
         <Nav section={section} id="overview" label="Overview" icon="grid-outline" onPress={setSection} />
         <Nav section={section} id="menu" label="Menu & availability" icon="restaurant-outline" onPress={setSection} />
         <Nav section={section} id="orders" label="Order board" icon="receipt-outline" badge={orders.filter((order) => !['delivered', 'cancelled'].includes(order.status)).length} onPress={setSection} />
+        <Nav section={section} id="dispatch" label="Walking dispatch" icon="walk-outline" badge={orders.filter((order) => order.delivery_type !== 'pickup' && ['accepted', 'preparing', 'ready'].includes(order.status) && !order.rider_id).length} onPress={setSection} />
         <Nav section={section} id="report" label="Daily report" icon="bar-chart-outline" onPress={setSection} />
         <Nav section={section} id="settings" label="Settings" icon="settings-outline" onPress={setSection} />
         <View style={styles.sidebarInfo}><Ionicons name="information-circle-outline" size={20} color="#176E73" /><Text style={styles.sidebarInfoText}>AOM manages cafeteria settlement and packaging. This workspace has no vendor payout section.</Text></View>
@@ -197,6 +220,7 @@ export default function CafeteriaPortalWorkspace() {
           if (error) Alert.alert('Order not updated', friendlyError(error, 'Refresh the order board and try the next available action.'));
           else { setFeedback(`Order #${order.order_number} is now ${status.replaceAll('_', ' ')}. The customer was notified.`); await loadOrders(); }
         }} /> : null}
+        {section === 'dispatch' ? <WalkingDispatch orders={orders} role={staff.role} onChanged={async (message) => { setFeedback(message); await loadOrders(); }} /> : null}
         {section === 'report' ? <Report orders={orders} products={products} /> : null}
         {section === 'settings' ? <AvailabilitySettings value={settings} canManage={isManager} onSaved={(next) => { setSettings(next); setFeedback('Cafeteria availability and customer notice have been saved.'); }} /> : null}
       </ScrollView>
@@ -273,9 +297,100 @@ function OrderActions({ order, role, busy, onUpdate }: { order: CafeteriaOrder; 
   if (['pending', 'awaiting_confirmation', 'paid'].includes(status)) next = { status: 'accepted', label: 'Accept order' };
   else if (status === 'accepted') next = { status: 'preparing', label: 'Start preparing' };
   else if (status === 'preparing') next = { status: 'ready', label: 'Mark ready' };
-  else if (status === 'ready') next = order.delivery_type === 'pickup' ? { status: 'delivered', label: 'Collected' } : { status: 'out_for_delivery', label: 'Dispatched' };
+  else if (status === 'ready') next = order.delivery_type === 'pickup' ? { status: 'delivered', label: 'Collected' } : order.rider_id ? { status: 'out_for_delivery', label: 'Dispatched' } : null;
   else if (status === 'out_for_delivery') next = { status: 'delivered', label: 'Delivered' };
-  return <View style={styles.orderActions}>{next && permitted(next.status) ? <TouchableOpacity disabled={busy} style={styles.primarySmall} onPress={() => void onUpdate(order, next!.status)}>{busy ? <ActivityIndicator size="small" color="#01193D" /> : <Text style={styles.primarySmallText}>{next.label}</Text>}</TouchableOpacity> : <Text style={styles.muted}>{['delivered', 'cancelled'].includes(status) ? 'Closed' : 'Waiting for authorised staff'}</Text>}{!['delivered', 'cancelled'].includes(status) && permitted('cancelled') ? <TouchableOpacity disabled={busy} style={styles.cancelSmall} onPress={() => confirmAction({ title: `Cancel order #${order.order_number}?`, message: 'The buyer will be notified and AOM will handle any refund.', confirmLabel: 'Cancel order', destructive: true, onConfirm: () => onUpdate(order, 'cancelled') })}><Text style={styles.cancelSmallText}>Cancel</Text></TouchableOpacity> : null}</View>;
+  return <View style={styles.orderActions}>{next && permitted(next.status) ? <TouchableOpacity disabled={busy} style={styles.primarySmall} onPress={() => void onUpdate(order, next!.status)}>{busy ? <ActivityIndicator size="small" color="#01193D" /> : <Text style={styles.primarySmallText}>{next.label}</Text>}</TouchableOpacity> : <Text style={styles.muted}>{['delivered', 'cancelled'].includes(status) ? 'Closed' : status === 'ready' && order.delivery_type !== 'pickup' && !order.rider_id ? 'Assign an agent in Walking dispatch' : 'Waiting for authorised staff'}</Text>}{!['delivered', 'cancelled'].includes(status) && permitted('cancelled') ? <TouchableOpacity disabled={busy} style={styles.cancelSmall} onPress={() => confirmAction({ title: `Cancel order #${order.order_number}?`, message: 'The buyer will be notified and AOM will handle any refund.', confirmLabel: 'Cancel order', destructive: true, onConfirm: () => onUpdate(order, 'cancelled') })}><Text style={styles.cancelSmallText}>Cancel</Text></TouchableOpacity> : null}</View>;
+}
+
+const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+function WalkingDispatch({ orders, role, onChanged }: { orders: CafeteriaOrder[]; role: Role; onChanged: (message: string) => Promise<void> }) {
+  const canDispatch = role === 'manager' || role === 'server';
+  const [recommendations, setRecommendations] = useState<Record<string, WalkingAgent[]>>({});
+  const [loadingOrder, setLoadingOrder] = useState('');
+  const [riders, setRiders] = useState<Rider[]>([]);
+  const [schedules, setSchedules] = useState<RiderSchedule[]>([]);
+  const [scheduleRider, setScheduleRider] = useState('');
+  const [scheduleDay, setScheduleDay] = useState(1);
+  const [scheduleStart, setScheduleStart] = useState('09:00');
+  const [scheduleEnd, setScheduleEnd] = useState('12:00');
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const deliveryOrders = orders.filter((order) => order.delivery_type !== 'pickup' && !['delivered', 'cancelled'].includes(order.status));
+
+  const loadDirectory = useCallback(async () => {
+    if (!canDispatch) return;
+    const [{ data: riderRows, error: riderError }, { data: scheduleRows, error: scheduleError }] = await Promise.all([
+      supabase.from('delivery_riders').select('id, full_name, phone, walking_status, campus_zones, max_orders_per_run').eq('availability', 'active').order('full_name'),
+      supabase.from('delivery_rider_schedules').select('id, rider_id, day_of_week, starts_at, ends_at, is_active').eq('is_active', true).order('day_of_week').order('starts_at'),
+    ]);
+    if (riderError || scheduleError) {
+      Alert.alert('Agent schedules unavailable', friendlyError(riderError ?? scheduleError, 'Apply the walking-dispatch database update, then refresh this page.'));
+      return;
+    }
+    const nextRiders = (riderRows ?? []) as Rider[];
+    setRiders(nextRiders);
+    setSchedules((scheduleRows ?? []) as RiderSchedule[]);
+    setScheduleRider((current) => current || nextRiders[0]?.id || '');
+  }, [canDispatch]);
+
+  useEffect(() => { void loadDirectory(); }, [loadDirectory]);
+
+  const findAgents = async (order: CafeteriaOrder) => {
+    setLoadingOrder(order.id);
+    const { data, error } = await supabase.rpc('recommend_cafeteria_walking_agents', { p_order_id: order.id, p_pickup_at: new Date().toISOString() });
+    setLoadingOrder('');
+    if (error) { Alert.alert('Recommendations unavailable', friendlyError(error, 'Check the order and agent schedules, then try again.')); return; }
+    setRecommendations((current) => ({ ...current, [order.id]: (data ?? []) as WalkingAgent[] }));
+  };
+
+  const assign = async (order: CafeteriaOrder, agent: WalkingAgent) => {
+    setLoadingOrder(order.id);
+    const { error } = await supabase.rpc('assign_cafeteria_walking_agent', { p_order_id: order.id, p_rider_id: agent.rider_id, p_pickup_at: new Date().toISOString() });
+    setLoadingOrder('');
+    if (error) { Alert.alert('Agent not assigned', friendlyError(error, 'Refresh the recommendations and choose another available student.')); return; }
+    setRecommendations((current) => ({ ...current, [order.id]: [] }));
+    await onChanged(`${agent.full_name} was assigned to order #${order.order_number}. The customer was notified.`);
+  };
+
+  const updateDelivery = async (order: CafeteriaOrder, status: 'out_for_delivery' | 'delivered') => {
+    setLoadingOrder(order.id);
+    const { error } = await supabase.rpc('update_cafeteria_order_status', { p_order_id: order.id, p_status: status });
+    setLoadingOrder('');
+    if (error) { Alert.alert('Delivery not updated', friendlyError(error, 'Refresh and try the delivery update again.')); return; }
+    await onChanged(status === 'out_for_delivery' ? `Order #${order.order_number} was collected. The customer was notified.` : `Order #${order.order_number} was marked delivered.`);
+    await loadDirectory();
+  };
+
+  const addSchedule = async () => {
+    if (!scheduleRider || !/^\d{2}:\d{2}$/.test(scheduleStart) || !/^\d{2}:\d{2}$/.test(scheduleEnd) || scheduleStart >= scheduleEnd) {
+      Alert.alert('Check the free period', 'Choose an agent and enter a valid start and end time, such as 09:00 to 12:00.');
+      return;
+    }
+    setSavingSchedule(true);
+    const { error } = await supabase.from('delivery_rider_schedules').insert({ rider_id: scheduleRider, day_of_week: scheduleDay, starts_at: scheduleStart, ends_at: scheduleEnd, is_active: true });
+    setSavingSchedule(false);
+    if (error) { Alert.alert('Schedule not saved', friendlyError(error, 'This shift may already exist. Review the day and times.')); return; }
+    await loadDirectory();
+  };
+
+  const removeSchedule = async (schedule: RiderSchedule) => {
+    const { error } = await supabase.from('delivery_rider_schedules').delete().eq('id', schedule.id);
+    if (error) Alert.alert('Schedule not removed', friendlyError(error, 'Only a cafeteria manager can change schedules.'));
+    else await loadDirectory();
+  };
+
+  return <>
+    <PageHead title="Walking dispatch" subtitle="Match paid cafeteria deliveries with AUN student agents who are free, on campus, and within their walking-run capacity." />
+    {!canDispatch ? <View style={styles.readOnly}><Ionicons name="lock-closed-outline" size={20} color="#805E15" /><Text style={styles.readOnlyText}>Only cafeteria managers and serving staff can assign student delivery agents.</Text></View> : null}
+    <View style={styles.safety}><Ionicons name="walk-outline" size={22} color="#176E73" /><Text style={[styles.safetyText, { color: '#176E73' }]}>Recommendations favour the lightest workload and matching campus coverage. Staff still confirm every assignment before the student is contacted.</Text></View>
+    <Text style={styles.panelTitle}>Delivery queue</Text>
+    <View style={styles.dispatchGrid}>{deliveryOrders.map((order) => {
+      const suggested = recommendations[order.id] ?? [];
+      return <View key={order.id} style={styles.walkCard}><View style={styles.orderTop}><View><Text style={styles.orderNumber}>Order #{order.order_number}</Text><Text style={styles.muted}>{order.delivery_address || 'Campus destination pending'}{order.delivery_slot ? ` · ${order.delivery_slot}` : ''}</Text></View><StatusPill status={order.dispatch_status ?? order.status} /></View><Text style={styles.walkItems}>{order.items.map((item) => `${item.quantity}× ${item.product_name}`).join(', ')}</Text>{order.rider_id ? <View style={styles.assignedAgent}><View style={styles.walkIcon}><Ionicons name="walk" size={21} color="#176E73" /></View><View style={{ flex: 1 }}><Text style={styles.riderName}>{order.rider_name}</Text><Text style={styles.muted}>Student walking agent · {order.rider_phone}</Text></View>{order.rider_phone ? <TouchableOpacity onPress={() => void Linking.openURL(`tel:${order.rider_phone}`)} style={styles.iconButton}><Ionicons name="call-outline" size={17} color="#176E73" /></TouchableOpacity> : null}{order.status === 'ready' ? <TouchableOpacity disabled={loadingOrder === order.id} onPress={() => void updateDelivery(order, 'out_for_delivery')} style={styles.primarySmall}><Text style={styles.primarySmallText}>Collected</Text></TouchableOpacity> : null}{order.status === 'out_for_delivery' ? <TouchableOpacity disabled={loadingOrder === order.id} onPress={() => void updateDelivery(order, 'delivered')} style={styles.primarySmall}><Text style={styles.primarySmallText}>Delivered</Text></TouchableOpacity> : null}</View> : <>{canDispatch && ['accepted', 'preparing', 'ready'].includes(order.status) ? <TouchableOpacity disabled={loadingOrder === order.id} onPress={() => void findAgents(order)} style={styles.secondaryButton}>{loadingOrder === order.id ? <ActivityIndicator color="#176E73" /> : <Text style={styles.secondaryButtonText}>{suggested.length ? 'Refresh recommendations' : 'Recommend free agents'}</Text>}</TouchableOpacity> : <Text style={styles.muted}>Accept this order before assigning an agent.</Text>}{suggested.length ? <View style={styles.recommendations}>{suggested.map((agent, index) => <View key={agent.rider_id} style={[styles.agentSuggestion, index === 0 && styles.bestSuggestion]}><View style={styles.suggestionRank}><Text style={styles.suggestionRankText}>{index + 1}</Text></View><View style={{ flex: 1 }}><Text style={styles.riderName}>{agent.full_name}</Text><Text style={styles.muted}>{agent.active_orders} active · {agent.runs_today} runs today · capacity {agent.max_orders_per_run}{agent.current_zone ? ` · near ${agent.current_zone}` : ''}</Text>{!agent.schedule_added ? <Text style={styles.scheduleWarning}>No weekly schedule yet—confirm by phone.</Text> : null}</View><TouchableOpacity disabled={loadingOrder === order.id} onPress={() => void assign(order, agent)} style={styles.primarySmall}><Text style={styles.primarySmallText}>Assign</Text></TouchableOpacity></View>)}</View> : recommendations[order.id] ? <Text style={styles.scheduleWarning}>No student is free for this time. Check schedules or contact an agent manually.</Text> : null}</>}</View>;
+    })}</View>
+    {!deliveryOrders.length ? <View style={styles.panel}><Empty icon="walk-outline" title="No cafeteria deliveries waiting" copy="Accepted campus delivery orders will appear here for assignment." /></View> : null}
+    <View style={styles.schedulePanel}><View><Text style={styles.panelTitle}>Student free-period schedules</Text><Text style={styles.subtitle}>Times use West Africa Time. A schedule can contain several free periods per day.</Text></View>{role === 'manager' ? <><Text style={styles.fieldLabel}>Choose student</Text><View style={styles.riderChoices}>{riders.map((rider) => <TouchableOpacity key={rider.id} onPress={() => setScheduleRider(rider.id)} style={[styles.riderChoice, scheduleRider === rider.id && styles.riderChoiceActive]}><Ionicons name="person-outline" size={16} color="#176E73" /><Text style={styles.riderChoiceText}>{rider.full_name}</Text></TouchableOpacity>)}</View><Text style={styles.fieldLabel}>Day</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dayChoices}>{dayNames.map((day, index) => <TouchableOpacity key={day} onPress={() => setScheduleDay(index)} style={[styles.dayChoice, scheduleDay === index && styles.dayChoiceActive]}><Text style={[styles.dayChoiceText, scheduleDay === index && styles.dayChoiceTextActive]}>{day.slice(0, 3)}</Text></TouchableOpacity>)}</ScrollView><View style={styles.scheduleForm}><Field label="Free from" value={scheduleStart} onChangeText={setScheduleStart} placeholder="09:00" half /><Field label="Free until" value={scheduleEnd} onChangeText={setScheduleEnd} placeholder="12:00" half /><TouchableOpacity disabled={savingSchedule} onPress={() => void addSchedule()} style={styles.saveSettings}>{savingSchedule ? <ActivityIndicator color="#01193D" /> : <><Ionicons name="add" size={18} color="#01193D" /><Text style={styles.saveSettingsText}>Add free period</Text></>}</TouchableOpacity></View></> : null}<View style={styles.scheduleList}>{riders.map((rider) => { const shifts = schedules.filter((schedule) => schedule.rider_id === rider.id); return <View key={rider.id} style={styles.scheduleRider}><View style={styles.scheduleRiderHead}><View><Text style={styles.riderName}>{rider.full_name}</Text><Text style={styles.muted}>{rider.walking_status.replaceAll('_', ' ')} · maximum {rider.max_orders_per_run} orders</Text></View><Text style={styles.shiftCount}>{shifts.length} free period{shifts.length === 1 ? '' : 's'}</Text></View><View style={styles.shiftWrap}>{shifts.map((shift) => <View key={shift.id} style={styles.shiftPill}><Text style={styles.shiftText}>{dayNames[shift.day_of_week].slice(0, 3)} {shift.starts_at.slice(0, 5)}–{shift.ends_at.slice(0, 5)}</Text>{role === 'manager' ? <TouchableOpacity onPress={() => void removeSchedule(shift)}><Ionicons name="close" size={15} color="#8D4A4A" /></TouchableOpacity> : null}</View>)}</View>{!shifts.length ? <Text style={styles.scheduleWarning}>No schedule entered. The agent can still be shown with a confirmation warning.</Text> : null}</View>; })}</View></View>
+  </>;
 }
 
 function Report({ orders, products }: { orders: CafeteriaOrder[]; products: Product[] }) {
@@ -390,6 +505,7 @@ const styles = StyleSheet.create({
   metricGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginBottom: 23 }, metric: { flexGrow: 1, flexBasis: 210, minHeight: 140, borderWidth: 1, borderColor: '#DFE5EA', borderRadius: 15, padding: 18 }, metricIcon: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 17 }, tone_navy: { backgroundColor: '#01193D' }, tone_green: { backgroundColor: '#DDF6EE' }, tone_gold: { backgroundColor: '#FFF0D1' }, tone_blue: { backgroundColor: '#E0ECFA' }, metricValue: { color: '#01193D', fontSize: 27, fontWeight: '800' }, metricLabel: { color: '#176E73', fontSize: 13, fontWeight: '800', marginTop: 4 }, twoColumn: { flexDirection: 'row', gap: 18, alignItems: 'flex-start' }, panel: { flex: 1, borderWidth: 1, borderColor: '#DFE5EA', borderRadius: 15, padding: 20, minHeight: 240 }, panelHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 13 }, panelTitle: { color: '#01193D', fontSize: 19, fontWeight: '800', marginBottom: 13 }, link: { color: '#176E73', fontSize: 13, fontWeight: '800' }, previewRow: { minHeight: 65, borderTopWidth: 1, borderTopColor: '#E7EBEF', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }, noticeBox: { padding: 14, borderRadius: 11, backgroundColor: '#E1F6F0', flexDirection: 'row', gap: 10, marginBottom: 13 }, warningBox: { backgroundColor: '#FFF0D1' }, noticeTitle: { color: '#176E73', fontSize: 14, fontWeight: '800' }, noticeCopy: { color: '#586776', fontSize: 12, lineHeight: 17, marginTop: 3 }, periodRow: { minHeight: 44, borderBottomWidth: 1, borderBottomColor: '#E7EBEF', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, periodName: { color: '#263342', textTransform: 'capitalize', fontSize: 14, fontWeight: '700' }, periodState: { fontSize: 13, fontWeight: '800' }, openText: { color: '#176E73' }, closedText: { color: '#B44646' }, secondaryButton: { marginTop: 15, minHeight: 43, borderWidth: 1, borderColor: '#25B68A', borderRadius: 9, alignItems: 'center', justifyContent: 'center' }, secondaryButtonText: { color: '#176E73', fontSize: 13, fontWeight: '800' },
   summaryRow: { flexDirection: 'row', gap: 12, marginBottom: 18 }, miniMetric: { minWidth: 150, minHeight: 77, borderWidth: 1, borderColor: '#DFE5EA', borderRadius: 12, padding: 14 }, miniValue: { color: '#01193D', fontSize: 23, fontWeight: '800' }, tabs: { flexDirection: 'row', gap: 26, borderBottomWidth: 1, borderBottomColor: '#DFE5EA', marginBottom: 15 }, tab: { paddingBottom: 12, borderBottomWidth: 3, borderBottomColor: 'transparent' }, tabActive: { borderBottomColor: '#25B68A' }, tabText: { color: '#74808E', fontSize: 15, fontWeight: '600' }, tabTextActive: { color: '#176E73', fontWeight: '800' }, table: { borderWidth: 1, borderColor: '#DFE5EA', borderRadius: 14, overflow: 'hidden' }, tableHead: { minHeight: 48, backgroundColor: '#F7F9FA', paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', gap: 12 }, column: { flex: 1, color: '#74808E', fontSize: 12, fontWeight: '800' }, tableRow: { minHeight: 79, borderTopWidth: 1, borderTopColor: '#E7EBEF', paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', gap: 12 }, productCell: { flexDirection: 'row', alignItems: 'center', gap: 11 }, productImage: { width: 46, height: 46, borderRadius: 9, backgroundColor: '#EEF1F4' }, productFallback: { width: 46, height: 46, borderRadius: 9, backgroundColor: '#01193D', alignItems: 'center', justifyContent: 'center' }, rowTitle: { color: '#1D2937', fontSize: 14, fontWeight: '800' }, muted: { color: '#7B8794', fontSize: 12, lineHeight: 17, marginTop: 2 }, tableText: { flex: 1, color: '#576675', fontSize: 13, textTransform: 'capitalize' }, amount: { flex: 1, color: '#01193D', fontSize: 14, fontWeight: '800' }, stockInput: { flex: 1, maxWidth: 92, height: 38, borderWidth: 1, borderColor: '#C9D3DC', borderRadius: 8, color: '#1D2937', fontSize: 13, textAlign: 'center', paddingHorizontal: 6 }, statusPill: { alignSelf: 'flex-start', minHeight: 31, maxWidth: 130, borderRadius: 16, backgroundColor: '#DFF5EE', paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 6 }, statusPillClosed: { backgroundColor: '#F2E4E4' }, statusText: { color: '#176E73', fontSize: 11, fontWeight: '800', textTransform: 'capitalize' }, statusTextClosed: { color: '#994646' }, rowActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 5 }, iconButton: { width: 33, height: 33, borderRadius: 8, borderWidth: 1, borderColor: '#CFD7DF', alignItems: 'center', justifyContent: 'center' }, deleteButton: { borderColor: '#EAC8C8' },
   orderGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 15 }, orderCard: { flexGrow: 1, flexBasis: 420, maxWidth: 590, borderWidth: 1, borderColor: '#DFE5EA', borderRadius: 15, padding: 18 }, orderTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12 }, orderNumber: { color: '#01193D', fontSize: 17, fontWeight: '800' }, orderMetaRow: { minHeight: 42, borderRadius: 9, backgroundColor: '#F3F7F8', paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 9 }, orderMeta: { color: '#4F6070', fontSize: 12, flex: 1 }, lineItem: { minHeight: 58, borderBottomWidth: 1, borderBottomColor: '#E7EBEF', flexDirection: 'row', alignItems: 'center', gap: 10 }, lineTitle: { color: '#273443', fontSize: 13, fontWeight: '800' }, itemNote: { color: '#805E15', fontSize: 11, marginTop: 3 }, orderFoot: { minHeight: 56, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }, orderTotal: { color: '#176E73', fontSize: 19, fontWeight: '800' }, orderActions: { flexDirection: 'row', alignItems: 'center', gap: 7 }, primarySmall: { minHeight: 38, paddingHorizontal: 13, borderRadius: 8, backgroundColor: '#68ECCB', alignItems: 'center', justifyContent: 'center' }, primarySmallText: { color: '#01193D', fontSize: 12, fontWeight: '800' }, cancelSmall: { minHeight: 38, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: '#E2BABA', alignItems: 'center', justifyContent: 'center' }, cancelSmallText: { color: '#A14444', fontSize: 12, fontWeight: '800' },
+  safety: { minHeight: 58, borderRadius: 11, backgroundColor: '#E1F6F0', paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 22 }, safetyText: { flex: 1, fontSize: 13, lineHeight: 19, fontWeight: '700' }, dispatchGrid: { gap: 14, marginBottom: 28 }, walkCard: { borderWidth: 1, borderColor: '#DFE5EA', borderRadius: 15, padding: 18, backgroundColor: '#FFF' }, walkItems: { color: '#526273', fontSize: 13, lineHeight: 19, marginBottom: 10 }, assignedAgent: { minHeight: 62, borderRadius: 11, backgroundColor: '#E1F6F0', padding: 10, flexDirection: 'row', alignItems: 'center', gap: 10 }, walkIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#C8EEE4', alignItems: 'center', justifyContent: 'center' }, riderName: { color: '#01193D', fontSize: 14, fontWeight: '800' }, recommendations: { gap: 8, marginTop: 12 }, agentSuggestion: { minHeight: 66, borderWidth: 1, borderColor: '#D9E0E6', borderRadius: 10, padding: 10, flexDirection: 'row', alignItems: 'center', gap: 10 }, bestSuggestion: { borderColor: '#25B68A', backgroundColor: '#F3FCF9' }, suggestionRank: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#01193D', alignItems: 'center', justifyContent: 'center' }, suggestionRankText: { color: '#FFF', fontSize: 12, fontWeight: '800' }, scheduleWarning: { color: '#8A5A00', fontSize: 11, lineHeight: 16, marginTop: 3 }, schedulePanel: { borderWidth: 1, borderColor: '#DFE5EA', borderRadius: 15, padding: 20, marginTop: 10 }, riderChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 13 }, riderChoice: { minHeight: 38, paddingHorizontal: 11, borderRadius: 19, borderWidth: 1, borderColor: '#CFD7DF', flexDirection: 'row', alignItems: 'center', gap: 6 }, riderChoiceActive: { borderColor: '#25B68A', backgroundColor: '#E1F6F0' }, riderChoiceText: { color: '#176E73', fontSize: 12, fontWeight: '800' }, dayChoices: { gap: 7, paddingBottom: 12 }, dayChoice: { minWidth: 52, height: 37, borderWidth: 1, borderColor: '#CFD7DF', borderRadius: 18, alignItems: 'center', justifyContent: 'center' }, dayChoiceActive: { backgroundColor: '#01193D', borderColor: '#01193D' }, dayChoiceText: { color: '#647181', fontSize: 12, fontWeight: '800' }, dayChoiceTextActive: { color: '#FFF' }, scheduleForm: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, maxWidth: 620 }, scheduleList: { gap: 10, marginTop: 22 }, scheduleRider: { borderTopWidth: 1, borderTopColor: '#E7EBEF', paddingTop: 13 }, scheduleRiderHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }, shiftCount: { color: '#176E73', fontSize: 11, fontWeight: '800' }, shiftWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 9 }, shiftPill: { minHeight: 32, borderRadius: 16, backgroundColor: '#F0F4F6', paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 7 }, shiftText: { color: '#526273', fontSize: 11, fontWeight: '700' },
   rangeButtons: { flexDirection: 'row', gap: 9, marginBottom: 20 }, rangeButton: { minHeight: 43, paddingHorizontal: 16, borderRadius: 9, borderWidth: 1, borderColor: '#CFD7DF', alignItems: 'center', justifyContent: 'center' }, rangeButtonActive: { backgroundColor: '#01193D', borderColor: '#01193D' }, rangeText: { color: '#647181', fontSize: 13, fontWeight: '800' }, rangeTextActive: { color: '#FFF' }, rankedRow: { minHeight: 49, borderTopWidth: 1, borderTopColor: '#E7EBEF', flexDirection: 'row', alignItems: 'center', gap: 10 }, rank: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#E1F6F0', color: '#176E73', fontSize: 12, fontWeight: '800', textAlign: 'center', lineHeight: 28 }, infoRow: { minHeight: 45, borderBottomWidth: 1, borderBottomColor: '#E7EBEF', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, infoLabel: { color: '#5A6877', fontSize: 13 }, infoValue: { color: '#01193D', fontSize: 14, fontWeight: '800' },
   readOnly: { minHeight: 50, borderRadius: 10, backgroundColor: '#FFF0D1', paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 15 }, readOnlyText: { color: '#805E15', fontSize: 13, fontWeight: '700' }, settingsPanel: { maxWidth: 780, borderWidth: 1, borderColor: '#DFE5EA', borderRadius: 15, padding: 20 }, toggleRow: { minHeight: 78, borderBottomWidth: 1, borderBottomColor: '#E7EBEF', flexDirection: 'row', alignItems: 'center', gap: 20 }, toggleLabel: { color: '#1D2937', fontSize: 15, fontWeight: '800' }, toggleCopy: { color: '#7B8794', fontSize: 12, lineHeight: 17, marginTop: 3 }, toggle: { width: 48, height: 27, borderRadius: 14, backgroundColor: '#CED5DC', padding: 3, justifyContent: 'center' }, toggleOn: { backgroundColor: '#68ECCB' }, toggleKnob: { width: 21, height: 21, borderRadius: 11, backgroundColor: '#FFF' }, toggleKnobOn: { alignSelf: 'flex-end', backgroundColor: '#176E73' }, noticeInput: { minHeight: 104, borderWidth: 1, borderColor: '#CFD7DF', borderRadius: 9, padding: 12, textAlignVertical: 'top', color: '#1D2937', fontSize: 14, marginTop: 8 }, saveSettings: { minHeight: 47, alignSelf: 'flex-end', marginTop: 16, borderRadius: 9, backgroundColor: '#68ECCB', paddingHorizontal: 17, flexDirection: 'row', alignItems: 'center', gap: 8 }, saveSettingsText: { color: '#01193D', fontSize: 13, fontWeight: '800' },
   empty: { padding: 32, alignItems: 'center', justifyContent: 'center' }, emptyTitle: { color: '#01193D', fontSize: 16, fontWeight: '800', marginTop: 8 }, emptyCopy: { color: '#7B8794', fontSize: 12, lineHeight: 18, textAlign: 'center', marginTop: 3 },

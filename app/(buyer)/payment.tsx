@@ -15,7 +15,7 @@ import { friendlyError } from '../../lib/user-error';
 
 type Method = 'paystack' | 'transfer';
 type PickupLocation = { id: string; name: string; pickup_location: string | null; pickup_instructions: string | null };
-type ServerQuote = { subtotal: number; serviceFee: number; deliveryFee: number; total: number; campusDelivery?: { active?: boolean; fee?: number; qualifying_vendor_count?: number }; rushHour?: { active?: boolean; standard_delivery_fee?: number; discounted_delivery_fee?: number; savings?: number } };
+type ServerQuote = { subtotal: number; serviceFee: number; packagingFee?: number; mealPlanCredit?: number; deliveryFee: number; total: number; campusDelivery?: { active?: boolean; fee?: number; qualifying_vendor_count?: number }; rushHour?: { active?: boolean; standard_delivery_fee?: number; discounted_delivery_fee?: number; savings?: number } };
 const PENDING_PAYMENT_REFERENCE = 'aom_pending_paystack_reference';
 const money = (value: number) => `\u20A6${value.toLocaleString('en-NG')}`;
 
@@ -25,7 +25,7 @@ WebBrowser.maybeCompleteAuthSession();
 
 export default function PaymentPage() {
   const router = useRouter();
-  const { address, slot, fulfilment, mealPlan, reference: returnedReference, trxref } = useLocalSearchParams<{ address?: string; slot?: string; fulfilment?: string; mealPlan?: string; reference?: string; trxref?: string }>();
+  const { address, directions, slot, fulfilment, mealPlan, reference: returnedReference, trxref } = useLocalSearchParams<{ address?: string; directions?: string; slot?: string; fulfilment?: string; mealPlan?: string; reference?: string; trxref?: string }>();
   const items = useCartStore((state) => state.items);
   const clearCart = useCartStore((state) => state.clearCart);
   const [method, setMethod] = useState<Method>('paystack');
@@ -49,6 +49,8 @@ export default function PaymentPage() {
   const deliveryFee = serverQuote?.deliveryFee ?? checkout.deliveryFee;
   const total = serverQuote?.total ?? checkout.total;
   const serviceFee = serverQuote?.serviceFee ?? checkout.serviceFee;
+  const packagingFee = serverQuote?.packagingFee ?? checkout.packagingFee;
+  const mealPlanCredit = serverQuote?.mealPlanCredit ?? checkout.mealPlanCredit;
   const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
   const checkoutItems = useMemo(() => items.map((item) => ({
     productId: item.productId,
@@ -112,15 +114,14 @@ export default function PaymentPage() {
   useEffect(() => {
     let active = true;
     const quote = async () => {
-      const marketplaceItems = items.filter((item) => !item.productId.startsWith('cafeteria:'));
-      if (!marketplaceItems.length || marketplaceItems.length !== items.length) { if (active) setServerQuote(null); return; }
-      const quoteItems = marketplaceItems.map((item) => ({ productId: item.productId, quantity: item.quantity, selectedOptions: item.selectedOptions?.map((option) => ({ id: option.id, quantity: option.quantity })), note: item.note ?? null }));
-      const { data, error } = await supabase.functions.invoke('checkout-quote', { body: { items: quoteItems, fulfilment: isPickup ? 'pickup' : 'delivery', slot: slot ?? null } });
+      if (!items.length || items.some((item) => item.productId.startsWith('service:'))) { if (active) setServerQuote(null); return; }
+      const quoteItems = items.map((item) => ({ productId: item.productId, quantity: item.quantity, selectedOptions: item.selectedOptions?.map((option) => ({ id: option.id, quantity: option.quantity })), note: item.note ?? null }));
+      const { data, error } = await supabase.functions.invoke('checkout-quote', { body: { items: quoteItems, fulfilment: isPickup ? 'pickup' : 'delivery', slot: slot ?? null, use_meal_plan: mealPlan === 'true' } });
       if (active) setServerQuote(!error && data?.pricing ? data.pricing as ServerQuote : null);
     };
     void quote();
     return () => { active = false; };
-  }, [items, isPickup, slot]);
+  }, [items, isPickup, mealPlan, slot]);
 
   useEffect(() => {
     const loadPickupLocations = async () => {
@@ -145,7 +146,7 @@ export default function PaymentPage() {
     setReturnedFromCheckout(false);
     await AsyncStorage.removeItem(PENDING_PAYMENT_REFERENCE);
     setPaying(true); setPaymentMessage('');
-    const { data, error } = await supabase.functions.invoke('paystack-initialize', { body: { items: checkoutItems, fulfilment: isPickup ? 'pickup' : 'delivery', address: address ?? null, slot: slot ?? null, callback_url: callbackUrl } });
+    const { data, error } = await supabase.functions.invoke('paystack-initialize', { body: { items: checkoutItems, fulfilment: isPickup ? 'pickup' : 'delivery', address: address ?? null, delivery_instructions: directions ?? null, slot: slot ?? null, callback_url: callbackUrl, use_meal_plan: mealPlan === 'true' } });
     setPaying(false);
     if (error || !data?.authorization_url) { setPaymentMessage(friendlyError(data?.error ?? error, 'Secure checkout did not open. Check your internet connection and tap Pay again. You have not been charged.')); return; }
     if (data.pricing) setServerQuote(data.pricing as ServerQuote);
@@ -200,8 +201,10 @@ export default function PaymentPage() {
         items: checkoutItems,
         fulfilment: isPickup ? 'pickup' : 'delivery',
         address: address ?? null,
+        delivery_instructions: directions ?? null,
         slot: slot ?? null,
         confirmed: true,
+        use_meal_plan: mealPlan === 'true',
       },
     });
     setSubmittingTransfer(false);
@@ -270,7 +273,7 @@ export default function PaymentPage() {
       {serverQuote?.campusDelivery?.active ? <View style={{ borderRadius: 10, padding: 13, backgroundColor: '#E1F5EE', flexDirection: 'row', gap: 9, alignItems: 'center' }}><Ionicons name="location-outline" size={20} color="#176E73" /><View style={{ flex: 1 }}><Text style={{ color: '#176E73', fontSize: 15, fontWeight: '800' }}>Campus delivery rate applied</Text><Text style={{ color: '#176E73', fontSize: 13, marginTop: 2 }}>Every store in this order operates on campus, so delivery is a flat {money(deliveryFee)}.</Text></View></View> : null}
       {serverQuote?.rushHour?.active ? <View style={{ borderRadius: 10, padding: 13, backgroundColor: '#E1F5EE', flexDirection: 'row', gap: 9, alignItems: 'center' }}><Ionicons name="flash-outline" size={20} color="#176E73" /><View style={{ flex: 1 }}><Text style={{ color: '#176E73', fontSize: 15, fontWeight: '800' }}>Rush Hour Deal applied</Text><Text style={{ color: '#176E73', fontSize: 13, marginTop: 2 }}>Delivery reduced from {money(Number(serverQuote.rushHour.standard_delivery_fee ?? 2500))} to {money(deliveryFee)} — you save {money(Number(serverQuote.rushHour.savings ?? 0))}.</Text></View></View> : null}
       {serviceFee > 0 && <View style={{ borderRadius: 10, padding: 13, backgroundColor: '#E1F5EE', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}><Text style={{ color: '#175E63', fontSize: 15, fontWeight: '700' }}>AOM service fee (10%)</Text><Text style={{ color: '#175E63', fontSize: 16, fontWeight: '800' }}>{money(serviceFee)}</Text></View>}
-      <View style={styles.summary}><View style={styles.summaryRow}><Text style={styles.summaryLabel}>Subtotal ({itemCount} items)</Text><Text style={styles.summaryValue}>{money(subtotal)}</Text></View>{checkout.packagingFee > 0 && <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Packaging ({checkout.mealCount} meal{checkout.mealCount === 1 ? '' : 's'})</Text><Text style={styles.summaryValue}>{money(checkout.packagingFee)}</Text></View>}<View style={styles.summaryRow}><Text style={styles.summaryLabel}>Delivery fee</Text><Text style={styles.summaryValue}>{isPickup ? 'Free' : money(deliveryFee)}</Text></View>{checkout.mealPlanCredit > 0 && <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Meal-plan credit</Text><Text style={styles.discount}>- {money(checkout.mealPlanCredit)}</Text></View>}<View style={styles.totalRow}><Text style={styles.totalLabel}>Total</Text><Text style={styles.total}>{money(total)}</Text></View></View>
+      <View style={styles.summary}><View style={styles.summaryRow}><Text style={styles.summaryLabel}>Subtotal ({itemCount} items)</Text><Text style={styles.summaryValue}>{money(subtotal)}</Text></View>{packagingFee > 0 && <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Packaging ({checkout.mealCount} meal{checkout.mealCount === 1 ? '' : 's'})</Text><Text style={styles.summaryValue}>{money(packagingFee)}</Text></View>}<View style={styles.summaryRow}><Text style={styles.summaryLabel}>Delivery fee</Text><Text style={styles.summaryValue}>{isPickup ? 'Free' : money(deliveryFee)}</Text></View>{mealPlanCredit > 0 && <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Meal-plan credit</Text><Text style={styles.discount}>- {money(mealPlanCredit)}</Text></View>}<View style={styles.totalRow}><Text style={styles.totalLabel}>Total</Text><Text style={styles.total}>{money(total)}</Text></View></View>
       <View style={styles.destination}><View style={styles.destinationIcon}><Ionicons name={isPickup ? 'walk-outline' : 'cube-outline'} size={23} color="#F8F3ED" /></View><View style={styles.destinationCopy}><Text style={styles.destinationLabel}>{isPickup ? 'PICKUP FROM' : 'DELIVERING TO'}</Text><Text style={styles.destinationTitle}>{isPickup ? pickupTitle : address || 'American University of Nigeria'}</Text><Text style={styles.destinationDetail}>{isPickup ? pickupDetail : slot || 'Choose a delivery slot'}</Text></View></View>
       <View style={styles.methods}><TouchableOpacity style={[styles.method, method === 'transfer' && styles.methodActive]} onPress={() => setMethod('transfer')}><Text style={[styles.methodText, method === 'transfer' && styles.methodTextActive]}>Bank transfer</Text></TouchableOpacity><TouchableOpacity style={[styles.method, method === 'paystack' && styles.methodActive]} onPress={() => setMethod('paystack')}><Text style={[styles.methodText, method === 'paystack' && styles.methodTextActive]}>Paystack</Text></TouchableOpacity></View>
       {method === 'paystack' ? <View style={styles.paymentCard}><View style={styles.paystackLogo}><View style={styles.logoBars}><View style={styles.logoBar} /><View style={styles.logoBar} /><View style={styles.logoBar} /></View><Text style={styles.paystackName}>Paystack</Text></View><Text style={styles.info}>You will be taken to Paystack's secure checkout to complete your payment. Card details are handled entirely by Paystack; we never see them.</Text><TouchableOpacity disabled={paying || verifying} style={[styles.payButton, (paying || verifying) && styles.payButtonDisabled]} onPress={openTracking}>{(paying || verifying) ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.payButtonText}>{`PAY ${money(total)}`}</Text>}</TouchableOpacity><View style={styles.secure}><Ionicons name="shield-checkmark-outline" size={15} color="#7E7E7E" /><Text style={styles.secureText}>Secured by Paystack - 256-bit SSL</Text></View></View> : <View style={styles.paymentCard}><View style={styles.transferStep}><View style={styles.number}><Text style={styles.numberText}>1</Text></View><View><Text style={styles.transferTitle}>Copy the account details below</Text><Text style={styles.transferDetail}>1894871594 - Kredi Money FMB</Text></View></View><View style={styles.transferStep}><View style={styles.number}><Text style={styles.numberText}>2</Text></View><View><Text style={styles.transferTitle}>Transfer exactly {money(total)}</Text><Text style={styles.transferDetail}>Amount must match exactly for confirmation</Text></View></View><View style={styles.transferStep}><View style={styles.number}><Text style={styles.numberText}>3</Text></View><View><Text style={styles.transferTitle}>Tap the confirmation button</Text><Text style={styles.transferDetail}>Your order will be recorded while the transfer awaits confirmation.</Text></View></View><TouchableOpacity disabled={submittingTransfer} style={[styles.payButton, submittingTransfer && styles.payButtonDisabled]} onPress={openTracking}>{submittingTransfer ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.payButtonText}>I HAVE COMPLETED THE TRANSFER</Text>}</TouchableOpacity></View>}

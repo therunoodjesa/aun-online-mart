@@ -33,7 +33,7 @@ Deno.serve(async (request) => {
     const db = admin();
     const { data: order, error: orderError } = await db
       .from('orders')
-      .select('id, order_number, delivery_type, delivery_address, delivery_slot, payment_status')
+      .select('id, order_number, delivery_type, delivery_address, delivery_instructions, delivery_slot, payment_status')
       .eq('id', order_id)
       .single();
     if (orderError || !order) throw new Error(orderError?.message ?? 'Order not found.');
@@ -76,7 +76,7 @@ Deno.serve(async (request) => {
         : vendorIds.length === 1
           ? 'Dispatch rider pickup — you are the only vendor on this pickup route.'
           : 'Dispatch rider pickup — this is a multi-vendor route, so the rider will also collect from other stores.';
-      const location = order.delivery_type === 'pickup' ? 'Customer will pick up from your store.' : (order.delivery_address || 'Delivery address will be confirmed in the vendor portal.');
+      const location = order.delivery_type === 'pickup' ? 'Customer will pick up from your store.' : [order.delivery_address || 'Delivery address will be confirmed in the vendor portal.', order.delivery_instructions].filter(Boolean).join(' · ');
       const owner = vendor.owner_id ? await db.auth.admin.getUserById(vendor.owner_id) : { data: { user: null } };
       const recipient = owner.data.user?.email ?? null;
       const payload = { order_number: order.order_number, vendor_items: vendorItems, fulfilment, location };
