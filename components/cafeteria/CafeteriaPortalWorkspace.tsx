@@ -135,23 +135,16 @@ export default function CafeteriaPortalWorkspace() {
   const isManager = staff?.role === 'manager';
 
   const loadOrders = useCallback(async () => {
-    const { data: lines, error: lineError } = await supabase
-      .from('cafeteria_order_items')
-      .select('id, order_id, product_name, quantity, unit_price, options, notes, meal_plan_credit, packaging_fee')
-      .order('created_at', { ascending: false });
-    if (lineError) return;
-    const orderIds = [...new Set((lines ?? []).map((line) => String(line.order_id)))];
-    if (!orderIds.length) { setOrders([]); return; }
-    const { data: orderRows } = await supabase
-      .from('orders')
-      .select('id, order_number, status, payment_status, total, delivery_address, delivery_instructions, delivery_slot, delivery_type, rider_id, rider_name, rider_phone, rider_assigned_at, dispatch_status, created_at')
-      .in('id', orderIds)
-      .eq('payment_status', 'paid')
-      .order('created_at', { ascending: false });
-    setOrders(((orderRows ?? []) as OrderRow[]).map((order) => ({
+    const { data, error } = await supabase.rpc('get_cafeteria_operations_orders');
+    if (error) {
+      setFeedback(`Orders could not load: ${error.message}`);
+      return;
+    }
+    const orderRows = Array.isArray(data) ? data as CafeteriaOrder[] : [];
+    setOrders(orderRows.map((order) => ({
       ...order,
       delivery_address: [order.delivery_address, order.delivery_instructions].filter(Boolean).join(' · ') || null,
-      items: (lines ?? []).filter((line) => line.order_id === order.id) as OrderItem[],
+      items: Array.isArray(order.items) ? order.items : [],
     })));
   }, []);
 

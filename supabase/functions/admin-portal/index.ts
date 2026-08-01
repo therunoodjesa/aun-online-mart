@@ -62,6 +62,10 @@ async function dashboard(db: ReturnType<typeof admin>) {
     ? await db.from('order_items').select('order_id, product_id, product_name, quantity').in('order_id', allOrderIds)
     : { data: [], error: null };
   if (itemsError) throw new Error(itemsError.message);
+  const { data: cafeteriaOrderItems, error: cafeteriaItemsError } = allOrderIds.length
+    ? await db.from('cafeteria_order_items').select('order_id, product_id, product_name, quantity').in('order_id', allOrderIds)
+    : { data: [], error: null };
+  if (cafeteriaItemsError) throw new Error(cafeteriaItemsError.message);
   const productIds = [...new Set((orderItems ?? []).map((item) => item.product_id).filter(Boolean))];
   const { data: orderProducts, error: productsError } = productIds.length
     ? await db.from('products').select('id, vendor_id').in('id', productIds)
@@ -82,15 +86,19 @@ async function dashboard(db: ReturnType<typeof admin>) {
   const fullVendorById = new Map((orderVendors ?? []).map((vendor) => [vendor.id, { ...vendor, contact: vendor.owner_id ? contactByOwnerId.get(vendor.owner_id) ?? null : null }]));
   const itemsByOrderId = new Map<string, typeof orderItems>();
   for (const item of orderItems ?? []) itemsByOrderId.set(item.order_id, [...(itemsByOrderId.get(item.order_id) ?? []), item]);
+  const cafeteriaItemsByOrderId = new Map<string, typeof cafeteriaOrderItems>();
+  for (const item of cafeteriaOrderItems ?? []) cafeteriaItemsByOrderId.set(item.order_id, [...(cafeteriaItemsByOrderId.get(item.order_id) ?? []), item]);
   const adminOrders = (allOrders ?? []).map((order) => {
     const items = itemsByOrderId.get(order.id) ?? [];
+    const cafeteriaItems = cafeteriaItemsByOrderId.get(order.id) ?? [];
     const vendorIdsForOrder = [...new Set(items.map((item) => productVendorById.get(item.product_id)).filter(Boolean))] as string[];
     return {
       ...order,
-      item_summary: items.map((item) => `${item.quantity}× ${item.product_name}`).join(', ') || 'Order items unavailable',
-      vendors: vendorIdsForOrder.length
-        ? vendorIdsForOrder.map((vendorId) => fullVendorById.get(vendorId)).filter(Boolean)
-        : [{ id: 'cafeteria', name: 'AUN Cafeteria', pickup_location: 'University cafeteria', contact: null }],
+      item_summary: [...items, ...cafeteriaItems].map((item) => `${item.quantity}× ${item.product_name}`).join(', ') || 'No order items were recorded',
+      vendors: [
+        ...vendorIdsForOrder.map((vendorId) => fullVendorById.get(vendorId)).filter(Boolean),
+        ...(cafeteriaItems.length ? [{ id: 'cafeteria', name: 'AUN Cafeteria', pickup_location: 'University cafeteria', contact: null }] : []),
+      ],
     };
   });
 
