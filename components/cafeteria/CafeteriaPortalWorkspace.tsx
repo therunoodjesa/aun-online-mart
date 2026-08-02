@@ -63,6 +63,8 @@ type OrderRow = {
   rider_phone: string | null;
   rider_assigned_at: string | null;
   dispatch_status: string | null;
+  customer_name: string;
+  customer_phone: string | null;
   created_at: string;
 };
 type OrderItem = {
@@ -89,7 +91,7 @@ type WalkingAgent = {
   schedule_added: boolean;
   recommendation_score: number;
 };
-type Rider = { id: string; full_name: string; phone: string; walking_status: string; campus_zones: string[]; max_orders_per_run: number };
+type Rider = { id: string; full_name: string; phone: string; accepts_calls: boolean; accepts_whatsapp: boolean; coverage_area: string | null; availability: string; walking_status: string; campus_zones: string[]; max_orders_per_run: number; cafeteria_note: string | null };
 type RiderSchedule = { id: string; rider_id: string; day_of_week: number; starts_at: string; ends_at: string; is_active: boolean };
 
 const periods: Category[] = ['snacks', 'lunch', 'dinner'];
@@ -235,7 +237,7 @@ function Overview({ products, orders, settings, setSection }: { products: Produc
       <Metric icon="people-outline" label="Orders today" value={String(todayOrders.length)} tone="blue" />
     </View>
     <View style={styles.twoColumn}>
-      <View style={styles.panel}><PanelHead title="Latest cafeteria orders" action="Open order board" onPress={() => setSection('orders')} />{active.slice(0, 5).map((order) => <View key={order.id} style={styles.previewRow}><View><Text style={styles.rowTitle}>#{order.order_number}</Text><Text style={styles.muted}>{order.items.map((item) => `${item.quantity}× ${item.product_name}`).join(', ')}</Text></View><StatusPill status={order.status} /></View>)}{!active.length ? <Empty icon="receipt-outline" title="No active orders" copy="New paid cafeteria orders will appear here immediately." /> : null}</View>
+      <View style={styles.panel}><PanelHead title="Latest cafeteria orders" action="Open order board" onPress={() => setSection('orders')} />{active.slice(0, 5).map((order) => <View key={order.id} style={styles.previewRow}><View><Text style={styles.rowTitle}>#{order.order_number} · {order.customer_name}</Text><Text style={styles.customerContact}>{order.customer_phone || 'Phone number not provided'}</Text><Text style={styles.muted}>{order.items.map((item) => `${item.quantity}× ${item.product_name}`).join(', ')}</Text></View><StatusPill status={order.status} /></View>)}{!active.length ? <Empty icon="receipt-outline" title="No active orders" copy="New paid cafeteria orders will appear here immediately." /> : null}</View>
       <View style={styles.panel}><Text style={styles.panelTitle}>Service availability</Text><View style={[styles.noticeBox, !settings.is_accepting_orders && styles.warningBox]}><Ionicons name={settings.is_accepting_orders ? 'checkmark-circle-outline' : 'pause-circle-outline'} size={24} color={settings.is_accepting_orders ? '#176E73' : '#8A5A00'} /><View style={{ flex: 1 }}><Text style={styles.noticeTitle}>{settings.is_accepting_orders ? 'Orders are open' : 'Orders are paused'}</Text><Text style={styles.noticeCopy}>{settings.customer_notice || 'No customer notice has been added.'}</Text></View></View>{periods.map((period) => <View key={period} style={styles.periodRow}><Text style={styles.periodName}>{period}</Text><Text style={[styles.periodState, settings[`${period}_open` as keyof Settings] ? styles.openText : styles.closedText]}>{settings[`${period}_open` as keyof Settings] ? 'Open' : 'Closed'}</Text></View>)}<TouchableOpacity style={styles.secondaryButton} onPress={() => setSection('settings')}><Text style={styles.secondaryButtonText}>Manage availability</Text></TouchableOpacity></View>
     </View>
   </>;
@@ -278,7 +280,39 @@ function OrderBoard({ orders, role, workingId, onUpdate }: { orders: CafeteriaOr
   return <>
     <PageHead title="Cafeteria order board" subtitle="Paid cafeteria requests appear here in real time. Each role only sees actions they are permitted to complete." />
     <View style={styles.tabs}>{(['active', 'complete', 'all'] as const).map((value) => <TouchableOpacity key={value} onPress={() => setFilter(value)} style={[styles.tab, filter === value && styles.tabActive]}><Text style={[styles.tabText, filter === value && styles.tabTextActive]}>{value[0].toUpperCase() + value.slice(1)}</Text></TouchableOpacity>)}</View>
-    <View style={styles.orderGrid}>{visible.map((order) => <View key={order.id} style={styles.orderCard}><View style={styles.orderTop}><View><Text style={styles.orderNumber}>Order #{order.order_number}</Text><Text style={styles.muted}>{dateTime(order.created_at)}</Text></View><StatusPill status={order.status} /></View><View style={styles.orderMetaRow}><Ionicons name={order.delivery_type === 'pickup' ? 'storefront-outline' : 'location-outline'} size={18} color="#176E73" /><Text style={styles.orderMeta}>{order.delivery_type === 'pickup' ? 'Customer pickup' : order.delivery_address || 'Delivery location pending'}{order.delivery_slot ? ` · ${order.delivery_slot}` : ''}</Text></View>{order.items.map((item) => <View key={item.id} style={styles.lineItem}><View style={{ flex: 1 }}><Text style={styles.lineTitle}>{item.quantity}× {item.product_name}</Text>{optionText(item.options) ? <Text style={styles.muted}>{optionText(item.options)}</Text> : null}{item.notes ? <Text style={styles.itemNote}>Note: {item.notes}</Text> : null}</View><Text style={styles.amount}>{money(item.unit_price * item.quantity)}</Text></View>)}<View style={styles.orderFoot}><Text style={styles.orderTotal}>{money(order.total)}</Text><OrderActions order={order} role={role} busy={workingId === order.id} onUpdate={onUpdate} /></View></View>)}</View>
+    <View style={styles.orderGrid}>
+      {visible.map((order) => (
+        <View key={order.id} style={styles.orderCard}>
+          <View style={styles.orderTop}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.orderNumber}>Order #{order.order_number}</Text>
+              <Text style={styles.customerName}>{order.customer_name}</Text>
+              <Text style={styles.customerContact}>{order.customer_phone || 'Phone number not provided'}</Text>
+              <Text style={styles.muted}>{dateTime(order.created_at)}</Text>
+            </View>
+            <StatusPill status={order.status} />
+          </View>
+          <View style={styles.orderMetaRow}>
+            <Ionicons name={order.delivery_type === 'pickup' ? 'storefront-outline' : 'location-outline'} size={18} color="#176E73" />
+            <Text style={styles.orderMeta}>{order.delivery_type === 'pickup' ? 'Customer pickup' : order.delivery_address || 'Delivery location pending'}{order.delivery_slot ? ` · ${order.delivery_slot}` : ''}</Text>
+          </View>
+          {order.items.map((item) => (
+            <View key={item.id} style={styles.lineItem}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.lineTitle}>{item.quantity}× {item.product_name}</Text>
+                {optionText(item.options) ? <Text style={styles.muted}>{optionText(item.options)}</Text> : null}
+                {item.notes ? <Text style={styles.itemNote}>Note: {item.notes}</Text> : null}
+              </View>
+              <Text style={styles.amount}>{money(item.unit_price * item.quantity)}</Text>
+            </View>
+          ))}
+          <View style={styles.orderFoot}>
+            <Text style={styles.orderTotal}>{money(order.total)}</Text>
+            <OrderActions order={order} role={role} busy={workingId === order.id} onUpdate={onUpdate} />
+          </View>
+        </View>
+      ))}
+    </View>
     {!visible.length ? <View style={styles.panel}><Empty icon="receipt-outline" title="No orders in this view" copy="New paid cafeteria orders update this board automatically." /></View> : null}
   </>;
 }
@@ -308,12 +342,21 @@ function WalkingDispatch({ orders, role, onChanged }: { orders: CafeteriaOrder[]
   const [scheduleStart, setScheduleStart] = useState('09:00');
   const [scheduleEnd, setScheduleEnd] = useState('12:00');
   const [savingSchedule, setSavingSchedule] = useState(false);
+  const [agentFormOpen, setAgentFormOpen] = useState(false);
+  const [agentName, setAgentName] = useState('');
+  const [agentPhone, setAgentPhone] = useState('');
+  const [agentCoverage, setAgentCoverage] = useState('All AUN campus locations');
+  const [agentCapacity, setAgentCapacity] = useState('4');
+  const [agentNote, setAgentNote] = useState('');
+  const [agentCalls, setAgentCalls] = useState(true);
+  const [agentWhatsapp, setAgentWhatsapp] = useState(true);
+  const [savingAgent, setSavingAgent] = useState(false);
   const deliveryOrders = orders.filter((order) => order.delivery_type !== 'pickup' && !['delivered', 'cancelled'].includes(order.status));
 
   const loadDirectory = useCallback(async () => {
     if (!canDispatch) return;
     const [{ data: riderRows, error: riderError }, { data: scheduleRows, error: scheduleError }] = await Promise.all([
-      supabase.from('delivery_riders').select('id, full_name, phone, walking_status, campus_zones, max_orders_per_run').eq('availability', 'active').order('full_name'),
+      supabase.from('delivery_riders').select('id, full_name, phone, accepts_calls, accepts_whatsapp, coverage_area, availability, walking_status, campus_zones, max_orders_per_run, cafeteria_note').eq('is_cafeteria_agent', true).eq('availability', 'active').order('full_name'),
       supabase.from('delivery_rider_schedules').select('id, rider_id, day_of_week, starts_at, ends_at, is_active').eq('is_active', true).order('day_of_week').order('starts_at'),
     ]);
     if (riderError || scheduleError) {
@@ -328,6 +371,44 @@ function WalkingDispatch({ orders, role, onChanged }: { orders: CafeteriaOrder[]
 
   useEffect(() => { void loadDirectory(); }, [loadDirectory]);
 
+  const resetAgentForm = () => {
+    setAgentName(''); setAgentPhone(''); setAgentCoverage('All AUN campus locations');
+    setAgentCapacity('4'); setAgentNote(''); setAgentCalls(true); setAgentWhatsapp(true);
+  };
+
+  const registerAgent = async () => {
+    const capacity = Number(agentCapacity);
+    if (agentName.trim().length < 2 || agentPhone.trim().length < 7 || !Number.isInteger(capacity) || capacity < 1 || capacity > 12) {
+      Alert.alert('Check the agent details', 'Enter the agent’s full name, a valid phone number, and a run capacity between 1 and 12 orders.');
+      return;
+    }
+    setSavingAgent(true);
+    const { data: auth } = await supabase.auth.getUser();
+    const savedName = agentName.trim();
+    const { error } = await supabase.from('delivery_riders').insert({
+      full_name: savedName, phone: agentPhone.trim(), accepts_calls: agentCalls,
+      accepts_whatsapp: agentWhatsapp, coverage_area: agentCoverage.trim() || null,
+      availability: 'active', walking_status: 'available', campus_zones: [],
+      max_orders_per_run: capacity, note: agentNote.trim() || null,
+      cafeteria_note: agentNote.trim() || null, is_cafeteria_agent: true,
+      hired_by: auth.user?.id ?? null, hired_at: new Date().toISOString(),
+    });
+    setSavingAgent(false);
+    if (error) {
+      Alert.alert('Agent not registered', friendlyError(error, error.code === '23505' ? 'That phone number is already registered. Review the roster or use another number.' : 'Check the details and your manager access, then try again.'));
+      return;
+    }
+    resetAgentForm(); setAgentFormOpen(false);
+    await loadDirectory();
+    await onChanged(`${savedName} was added to the cafeteria delivery roster.`);
+  };
+
+  const updateAgent = async (rider: Rider, payload: Record<string, unknown>, message: string) => {
+    const { error } = await supabase.from('delivery_riders').update(payload).eq('id', rider.id).eq('is_cafeteria_agent', true);
+    if (error) Alert.alert('Agent not updated', friendlyError(error, 'Only a cafeteria manager can change the hired-agent roster.'));
+    else { await loadDirectory(); await onChanged(message); }
+  };
+
   const findAgents = async (order: CafeteriaOrder) => {
     setLoadingOrder(order.id);
     const { data, error } = await supabase.rpc('recommend_cafeteria_walking_agents', { p_order_id: order.id, p_pickup_at: new Date().toISOString() });
@@ -340,7 +421,7 @@ function WalkingDispatch({ orders, role, onChanged }: { orders: CafeteriaOrder[]
     setLoadingOrder(order.id);
     const { error } = await supabase.rpc('assign_cafeteria_walking_agent', { p_order_id: order.id, p_rider_id: agent.rider_id, p_pickup_at: new Date().toISOString() });
     setLoadingOrder('');
-    if (error) { Alert.alert('Agent not assigned', friendlyError(error, 'Refresh the recommendations and choose another available student.')); return; }
+    if (error) { Alert.alert('Agent not assigned', friendlyError(error, 'Refresh the recommendations and choose another available agent.')); return; }
     setRecommendations((current) => ({ ...current, [order.id]: [] }));
     await onChanged(`${agent.full_name} was assigned to order #${order.order_number}. The customer was notified.`);
   };
@@ -373,17 +454,70 @@ function WalkingDispatch({ orders, role, onChanged }: { orders: CafeteriaOrder[]
   };
 
   return <>
-    <PageHead title="Walking dispatch" subtitle="Match paid cafeteria deliveries with AUN student agents who are free, on campus, and within their walking-run capacity." />
-    {!canDispatch ? <View style={styles.readOnly}><Ionicons name="lock-closed-outline" size={20} color="#805E15" /><Text style={styles.readOnlyText}>Only cafeteria managers and serving staff can assign student delivery agents.</Text></View> : null}
-    <View style={styles.safety}><Ionicons name="walk-outline" size={22} color="#176E73" /><Text style={[styles.safetyText, { color: '#176E73' }]}>Recommendations favour the lightest workload and matching campus coverage. Staff still confirm every assignment before the student is contacted.</Text></View>
+    <PageHead title="Walking dispatch" subtitle="Register hired delivery agents, manage their schedules, and match them with paid cafeteria deliveries." />
+    {!canDispatch ? <View style={styles.readOnly}><Ionicons name="lock-closed-outline" size={20} color="#805E15" /><Text style={styles.readOnlyText}>Only cafeteria managers and serving staff can assign delivery agents.</Text></View> : null}
+    <View style={styles.safety}><Ionicons name="walk-outline" size={22} color="#176E73" /><Text style={[styles.safetyText, { color: '#176E73' }]}>Only agents manually registered by the cafeteria manager appear here. Recommendations favour the lightest workload and matching campus coverage.</Text></View>
+    {role === 'manager' ? <AgentRosterPanel riders={riders} formOpen={agentFormOpen} setFormOpen={setAgentFormOpen} name={agentName} setName={setAgentName} phone={agentPhone} setPhone={setAgentPhone} coverage={agentCoverage} setCoverage={setAgentCoverage} capacity={agentCapacity} setCapacity={setAgentCapacity} note={agentNote} setNote={setAgentNote} calls={agentCalls} setCalls={setAgentCalls} whatsapp={agentWhatsapp} setWhatsapp={setAgentWhatsapp} saving={savingAgent} onSave={registerAgent} onUpdate={updateAgent} /> : null}
     <Text style={styles.panelTitle}>Delivery queue</Text>
     <View style={styles.dispatchGrid}>{deliveryOrders.map((order) => {
       const suggested = recommendations[order.id] ?? [];
-      return <View key={order.id} style={styles.walkCard}><View style={styles.orderTop}><View><Text style={styles.orderNumber}>Order #{order.order_number}</Text><Text style={styles.muted}>{order.delivery_address || 'Campus destination pending'}{order.delivery_slot ? ` · ${order.delivery_slot}` : ''}</Text></View><StatusPill status={order.dispatch_status ?? order.status} /></View><Text style={styles.walkItems}>{order.items.map((item) => `${item.quantity}× ${item.product_name}`).join(', ')}</Text>{order.rider_id ? <View style={styles.assignedAgent}><View style={styles.walkIcon}><Ionicons name="walk" size={21} color="#176E73" /></View><View style={{ flex: 1 }}><Text style={styles.riderName}>{order.rider_name}</Text><Text style={styles.muted}>Student walking agent · {order.rider_phone}</Text></View>{order.rider_phone ? <TouchableOpacity onPress={() => void Linking.openURL(`tel:${order.rider_phone}`)} style={styles.iconButton}><Ionicons name="call-outline" size={17} color="#176E73" /></TouchableOpacity> : null}{order.status === 'ready' ? <TouchableOpacity disabled={loadingOrder === order.id} onPress={() => void updateDelivery(order, 'out_for_delivery')} style={styles.primarySmall}><Text style={styles.primarySmallText}>Collected</Text></TouchableOpacity> : null}{order.status === 'out_for_delivery' ? <TouchableOpacity disabled={loadingOrder === order.id} onPress={() => void updateDelivery(order, 'delivered')} style={styles.primarySmall}><Text style={styles.primarySmallText}>Delivered</Text></TouchableOpacity> : null}</View> : <>{canDispatch && ['accepted', 'preparing', 'ready'].includes(order.status) ? <TouchableOpacity disabled={loadingOrder === order.id} onPress={() => void findAgents(order)} style={styles.secondaryButton}>{loadingOrder === order.id ? <ActivityIndicator color="#176E73" /> : <Text style={styles.secondaryButtonText}>{suggested.length ? 'Refresh recommendations' : 'Recommend free agents'}</Text>}</TouchableOpacity> : <Text style={styles.muted}>Accept this order before assigning an agent.</Text>}{suggested.length ? <View style={styles.recommendations}>{suggested.map((agent, index) => <View key={agent.rider_id} style={[styles.agentSuggestion, index === 0 && styles.bestSuggestion]}><View style={styles.suggestionRank}><Text style={styles.suggestionRankText}>{index + 1}</Text></View><View style={{ flex: 1 }}><Text style={styles.riderName}>{agent.full_name}</Text><Text style={styles.muted}>{agent.active_orders} active · {agent.runs_today} runs today · capacity {agent.max_orders_per_run}{agent.current_zone ? ` · near ${agent.current_zone}` : ''}</Text>{!agent.schedule_added ? <Text style={styles.scheduleWarning}>No weekly schedule yet—confirm by phone.</Text> : null}</View><TouchableOpacity disabled={loadingOrder === order.id} onPress={() => void assign(order, agent)} style={styles.primarySmall}><Text style={styles.primarySmallText}>Assign</Text></TouchableOpacity></View>)}</View> : recommendations[order.id] ? <Text style={styles.scheduleWarning}>No student is free for this time. Check schedules or contact an agent manually.</Text> : null}</>}</View>;
+      return (
+        <View key={order.id} style={styles.walkCard}>
+          <View style={styles.orderTop}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.orderNumber}>Order #{order.order_number}</Text>
+              <Text style={styles.customerName}>{order.customer_name}</Text>
+              <Text style={styles.customerContact}>{order.customer_phone || 'Phone number not provided'}</Text>
+              <Text style={styles.muted}>{order.delivery_address || 'Campus destination pending'}{order.delivery_slot ? ` · ${order.delivery_slot}` : ''}</Text>
+            </View>
+            <StatusPill status={order.dispatch_status ?? order.status} />
+          </View>
+          <Text style={styles.walkItems}>{order.items.map((item) => `${item.quantity}× ${item.product_name}`).join(', ')}</Text>
+          {order.rider_id ? (
+            <View style={styles.assignedAgent}>
+              <View style={styles.walkIcon}><Ionicons name="walk" size={21} color="#176E73" /></View>
+              <View style={{ flex: 1 }}><Text style={styles.riderName}>{order.rider_name}</Text><Text style={styles.muted}>Cafeteria delivery agent · {order.rider_phone}</Text></View>
+              {order.rider_phone ? <TouchableOpacity onPress={() => void Linking.openURL(`tel:${order.rider_phone}`)} style={styles.iconButton}><Ionicons name="call-outline" size={17} color="#176E73" /></TouchableOpacity> : null}
+              {order.status === 'ready' ? <TouchableOpacity disabled={loadingOrder === order.id} onPress={() => void updateDelivery(order, 'out_for_delivery')} style={styles.primarySmall}><Text style={styles.primarySmallText}>Collected</Text></TouchableOpacity> : null}
+              {order.status === 'out_for_delivery' ? <TouchableOpacity disabled={loadingOrder === order.id} onPress={() => void updateDelivery(order, 'delivered')} style={styles.primarySmall}><Text style={styles.primarySmallText}>Delivered</Text></TouchableOpacity> : null}
+            </View>
+          ) : (
+            <>
+              {canDispatch && ['accepted', 'preparing', 'ready'].includes(order.status) ? <TouchableOpacity disabled={loadingOrder === order.id} onPress={() => void findAgents(order)} style={styles.secondaryButton}>{loadingOrder === order.id ? <ActivityIndicator color="#176E73" /> : <Text style={styles.secondaryButtonText}>{suggested.length ? 'Refresh recommendations' : 'Recommend free agents'}</Text>}</TouchableOpacity> : <Text style={styles.muted}>Accept this order before assigning an agent.</Text>}
+              {suggested.length ? <View style={styles.recommendations}>{suggested.map((agent, index) => <View key={agent.rider_id} style={[styles.agentSuggestion, index === 0 && styles.bestSuggestion]}><View style={styles.suggestionRank}><Text style={styles.suggestionRankText}>{index + 1}</Text></View><View style={{ flex: 1 }}><Text style={styles.riderName}>{agent.full_name}</Text><Text style={styles.muted}>{agent.active_orders} active · {agent.runs_today} runs today · capacity {agent.max_orders_per_run}{agent.current_zone ? ` · near ${agent.current_zone}` : ''}</Text>{!agent.schedule_added ? <Text style={styles.scheduleWarning}>No weekly schedule yet—confirm by phone.</Text> : null}</View><TouchableOpacity disabled={loadingOrder === order.id} onPress={() => void assign(order, agent)} style={styles.primarySmall}><Text style={styles.primarySmallText}>Assign</Text></TouchableOpacity></View>)}</View> : recommendations[order.id] ? <Text style={styles.scheduleWarning}>No hired agent is free for this time. Check schedules or contact an agent manually.</Text> : null}
+            </>
+          )}
+        </View>
+      );
     })}</View>
     {!deliveryOrders.length ? <View style={styles.panel}><Empty icon="walk-outline" title="No cafeteria deliveries waiting" copy="Accepted campus delivery orders will appear here for assignment." /></View> : null}
-    <View style={styles.schedulePanel}><View><Text style={styles.panelTitle}>Student free-period schedules</Text><Text style={styles.subtitle}>Times use West Africa Time. A schedule can contain several free periods per day.</Text></View>{role === 'manager' ? <><Text style={styles.fieldLabel}>Choose student</Text><View style={styles.riderChoices}>{riders.map((rider) => <TouchableOpacity key={rider.id} onPress={() => setScheduleRider(rider.id)} style={[styles.riderChoice, scheduleRider === rider.id && styles.riderChoiceActive]}><Ionicons name="person-outline" size={16} color="#176E73" /><Text style={styles.riderChoiceText}>{rider.full_name}</Text></TouchableOpacity>)}</View><Text style={styles.fieldLabel}>Day</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dayChoices}>{dayNames.map((day, index) => <TouchableOpacity key={day} onPress={() => setScheduleDay(index)} style={[styles.dayChoice, scheduleDay === index && styles.dayChoiceActive]}><Text style={[styles.dayChoiceText, scheduleDay === index && styles.dayChoiceTextActive]}>{day.slice(0, 3)}</Text></TouchableOpacity>)}</ScrollView><View style={styles.scheduleForm}><Field label="Free from" value={scheduleStart} onChangeText={setScheduleStart} placeholder="09:00" half /><Field label="Free until" value={scheduleEnd} onChangeText={setScheduleEnd} placeholder="12:00" half /><TouchableOpacity disabled={savingSchedule} onPress={() => void addSchedule()} style={styles.saveSettings}>{savingSchedule ? <ActivityIndicator color="#01193D" /> : <><Ionicons name="add" size={18} color="#01193D" /><Text style={styles.saveSettingsText}>Add free period</Text></>}</TouchableOpacity></View></> : null}<View style={styles.scheduleList}>{riders.map((rider) => { const shifts = schedules.filter((schedule) => schedule.rider_id === rider.id); return <View key={rider.id} style={styles.scheduleRider}><View style={styles.scheduleRiderHead}><View><Text style={styles.riderName}>{rider.full_name}</Text><Text style={styles.muted}>{rider.walking_status.replaceAll('_', ' ')} · maximum {rider.max_orders_per_run} orders</Text></View><Text style={styles.shiftCount}>{shifts.length} free period{shifts.length === 1 ? '' : 's'}</Text></View><View style={styles.shiftWrap}>{shifts.map((shift) => <View key={shift.id} style={styles.shiftPill}><Text style={styles.shiftText}>{dayNames[shift.day_of_week].slice(0, 3)} {shift.starts_at.slice(0, 5)}–{shift.ends_at.slice(0, 5)}</Text>{role === 'manager' ? <TouchableOpacity onPress={() => void removeSchedule(shift)}><Ionicons name="close" size={15} color="#8D4A4A" /></TouchableOpacity> : null}</View>)}</View>{!shifts.length ? <Text style={styles.scheduleWarning}>No schedule entered. The agent can still be shown with a confirmation warning.</Text> : null}</View>; })}</View></View>
+    <View style={styles.schedulePanel}>
+      <View><Text style={styles.panelTitle}>Agent availability schedules</Text><Text style={styles.subtitle}>Times use West Africa Time. A schedule can contain several available periods per day.</Text></View>
+      {role === 'manager' ? <>
+        <Text style={styles.fieldLabel}>Choose agent</Text>
+        <View style={styles.riderChoices}>{riders.map((rider) => <TouchableOpacity key={rider.id} onPress={() => setScheduleRider(rider.id)} style={[styles.riderChoice, scheduleRider === rider.id && styles.riderChoiceActive]}><Ionicons name="person-outline" size={16} color="#176E73" /><Text style={styles.riderChoiceText}>{rider.full_name}</Text></TouchableOpacity>)}</View>
+        <Text style={styles.fieldLabel}>Day</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dayChoices}>{dayNames.map((day, index) => <TouchableOpacity key={day} onPress={() => setScheduleDay(index)} style={[styles.dayChoice, scheduleDay === index && styles.dayChoiceActive]}><Text style={[styles.dayChoiceText, scheduleDay === index && styles.dayChoiceTextActive]}>{day.slice(0, 3)}</Text></TouchableOpacity>)}</ScrollView>
+        <View style={styles.scheduleForm}><Field label="Available from" value={scheduleStart} onChangeText={setScheduleStart} placeholder="09:00" half /><Field label="Available until" value={scheduleEnd} onChangeText={setScheduleEnd} placeholder="12:00" half /><TouchableOpacity disabled={savingSchedule} onPress={() => void addSchedule()} style={styles.saveSettings}>{savingSchedule ? <ActivityIndicator color="#01193D" /> : <><Ionicons name="add" size={18} color="#01193D" /><Text style={styles.saveSettingsText}>Add period</Text></>}</TouchableOpacity></View>
+      </> : null}
+      <View style={styles.scheduleList}>{riders.map((rider) => { const shifts = schedules.filter((schedule) => schedule.rider_id === rider.id); return <View key={rider.id} style={styles.scheduleRider}><View style={styles.scheduleRiderHead}><View><Text style={styles.riderName}>{rider.full_name}</Text><Text style={styles.muted}>{rider.walking_status.replaceAll('_', ' ')} · maximum {rider.max_orders_per_run} orders</Text></View><Text style={styles.shiftCount}>{shifts.length} period{shifts.length === 1 ? '' : 's'}</Text></View><View style={styles.shiftWrap}>{shifts.map((shift) => <View key={shift.id} style={styles.shiftPill}><Text style={styles.shiftText}>{dayNames[shift.day_of_week].slice(0, 3)} {shift.starts_at.slice(0, 5)}–{shift.ends_at.slice(0, 5)}</Text>{role === 'manager' ? <TouchableOpacity onPress={() => void removeSchedule(shift)}><Ionicons name="close" size={15} color="#8D4A4A" /></TouchableOpacity> : null}</View>)}</View>{!shifts.length ? <Text style={styles.scheduleWarning}>No schedule entered. The agent can still be shown with a confirmation warning.</Text> : null}</View>; })}</View>
+    </View>
   </>;
+}
+
+function AgentRosterPanel({ riders, formOpen, setFormOpen, name, setName, phone, setPhone, coverage, setCoverage, capacity, setCapacity, note, setNote, calls, setCalls, whatsapp, setWhatsapp, saving, onSave, onUpdate }: {
+  riders: Rider[]; formOpen: boolean; setFormOpen: (value: boolean | ((current: boolean) => boolean)) => void;
+  name: string; setName: (value: string) => void; phone: string; setPhone: (value: string) => void;
+  coverage: string; setCoverage: (value: string) => void; capacity: string; setCapacity: (value: string) => void;
+  note: string; setNote: (value: string) => void; calls: boolean; setCalls: (value: boolean | ((current: boolean) => boolean)) => void;
+  whatsapp: boolean; setWhatsapp: (value: boolean | ((current: boolean) => boolean)) => void; saving: boolean;
+  onSave: () => Promise<void>; onUpdate: (rider: Rider, payload: Record<string, unknown>, message: string) => Promise<void>;
+}) {
+  return <View style={styles.schedulePanel}>
+    <View style={styles.panelHead}><View><Text style={styles.panelTitle}>Hired delivery agents</Text><Text style={styles.subtitle}>Build and maintain the cafeteria’s own roster as agents are hired.</Text></View><TouchableOpacity style={styles.primarySmall} onPress={() => setFormOpen((current) => !current)}><Ionicons name={formOpen ? 'close' : 'person-add-outline'} size={17} color="#01193D" /><Text style={styles.primarySmallText}>{formOpen ? 'Close' : 'Register agent'}</Text></TouchableOpacity></View>
+    {formOpen ? <View style={styles.agentForm}><View style={styles.fieldPair}><Field label="Full name" value={name} onChangeText={setName} placeholder="e.g. Amina Bello" half /><Field label="Phone number" value={phone} onChangeText={setPhone} placeholder="080…" keyboardType="phone-pad" half /></View><View style={styles.fieldPair}><Field label="Coverage" value={coverage} onChangeText={setCoverage} placeholder="e.g. All AUN dorms" half /><Field label="Maximum orders per run" value={capacity} onChangeText={setCapacity} placeholder="4" keyboardType="numeric" half /></View><Field label="Manager note (optional)" value={note} onChangeText={setNote} placeholder="Availability, emergency contact, or other private note" /><View style={styles.contactChoices}><TouchableOpacity onPress={() => setCalls((current) => !current)} style={[styles.choicePill, calls && styles.choicePillActive]}><Ionicons name={calls ? 'checkmark-circle' : 'ellipse-outline'} size={16} color="#176E73" /><Text style={styles.choicePillText}>Accepts calls</Text></TouchableOpacity><TouchableOpacity onPress={() => setWhatsapp((current) => !current)} style={[styles.choicePill, whatsapp && styles.choicePillActive]}><Ionicons name={whatsapp ? 'checkmark-circle' : 'ellipse-outline'} size={16} color="#176E73" /><Text style={styles.choicePillText}>Accepts WhatsApp</Text></TouchableOpacity></View><TouchableOpacity disabled={saving} onPress={() => void onSave()} style={styles.saveSettings}>{saving ? <ActivityIndicator color="#01193D" /> : <><Ionicons name="save-outline" size={18} color="#01193D" /><Text style={styles.saveSettingsText}>Save agent</Text></>}</TouchableOpacity></View> : null}
+    <View style={styles.agentRoster}>{riders.map((rider) => <View key={rider.id} style={styles.rosterRow}><View style={styles.walkIcon}><Ionicons name="person-outline" size={20} color="#176E73" /></View><View style={{ flex: 1 }}><Text style={styles.riderName}>{rider.full_name}</Text><Text style={styles.muted}>{rider.phone}{rider.coverage_area ? ` · ${rider.coverage_area}` : ''} · capacity {rider.max_orders_per_run}</Text></View><View style={styles.rosterActions}><TouchableOpacity onPress={() => void onUpdate(rider, { walking_status: rider.walking_status === 'available' ? 'off_duty' : 'available' }, `${rider.full_name} is now ${rider.walking_status === 'available' ? 'off duty' : 'available'}.`)} style={[styles.agentState, rider.walking_status === 'available' && styles.agentStateActive]}><Text style={[styles.agentStateText, rider.walking_status === 'available' && styles.agentStateTextActive]}>{rider.walking_status.replaceAll('_', ' ')}</Text></TouchableOpacity><TouchableOpacity onPress={() => confirmAction({ title: `Remove ${rider.full_name} from the active roster?`, message: 'Their past deliveries will remain in order history.', confirmLabel: 'Deactivate agent', destructive: true, onConfirm: () => onUpdate(rider, { availability: 'unavailable', walking_status: 'off_duty' }, `${rider.full_name} was removed from the active roster.`) })} style={[styles.iconButton, styles.deleteButton]}><Ionicons name="person-remove-outline" size={17} color="#B44646" /></TouchableOpacity></View></View>)}{!riders.length ? <Empty icon="people-outline" title="No agents registered" copy="Use Register agent when the cafeteria hires its first delivery agent." /> : null}</View>
+  </View>;
 }
 
 function Report({ orders, products }: { orders: CafeteriaOrder[]; products: Product[] }) {
@@ -491,6 +625,17 @@ function DesktopPrompt() { return <View style={styles.center}><Ionicons name="de
 function AccessPrompt({ onReturn }: { onReturn: () => void }) { return <View style={styles.center}><Ionicons name="lock-closed-outline" size={43} color="#68ECCB" /><Text style={styles.accessTitle}>Cafeteria access is not linked yet</Text><Text style={styles.accessCopy}>Ask an AOM administrator to add this account to cafeteria staff and choose its role.</Text><TouchableOpacity onPress={onReturn} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Return to AOM</Text></TouchableOpacity></View>; }
 
 const styles = StyleSheet.create({
+  agentForm: { borderTopWidth: 1, borderTopColor: '#E7EBEF', paddingTop: 15, marginBottom: 18 },
+  contactChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  agentRoster: { gap: 8, marginTop: 14 },
+  rosterRow: { minHeight: 66, borderTopWidth: 1, borderTopColor: '#E7EBEF', paddingTop: 10, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  rosterActions: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  agentState: { minHeight: 32, borderRadius: 16, borderWidth: 1, borderColor: '#CFD7DF', paddingHorizontal: 11, alignItems: 'center', justifyContent: 'center' },
+  agentStateActive: { borderColor: '#25B68A', backgroundColor: '#E1F6F0' },
+  agentStateText: { color: '#647181', fontSize: 11, fontWeight: '800', textTransform: 'capitalize' },
+  agentStateTextActive: { color: '#176E73' },
+  customerName: { color: '#1D2937', fontSize: 14, fontWeight: '800', marginTop: 4 },
+  customerContact: { color: '#176E73', fontSize: 12, fontWeight: '700', marginTop: 2 },
   screen: { flex: 1, backgroundColor: '#FFF' }, center: { flex: 1, backgroundColor: '#01193D', alignItems: 'center', justifyContent: 'center', padding: 32 }, accessTitle: { color: '#FFF', fontSize: 25, fontWeight: '800', marginTop: 16 }, accessCopy: { color: '#C9D7EA', fontSize: 16, lineHeight: 23, textAlign: 'center', maxWidth: 480, marginTop: 8, marginBottom: 24 },
   topbar: { height: 78, backgroundColor: '#01193D', paddingHorizontal: 30, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, brand: { flexDirection: 'row', alignItems: 'center', gap: 12 }, brandName: { color: '#F8F3ED', fontSize: 21, fontWeight: '800' }, brandPortal: { color: '#8FA1BB', fontSize: 16, fontWeight: '600' }, topActions: { flexDirection: 'row', alignItems: 'center', gap: 12 }, acceptingPill: { height: 44, borderRadius: 11, borderWidth: 1, borderColor: '#214A80', paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 8 }, acceptingText: { color: '#F8F3ED', fontSize: 14, fontWeight: '800' }, liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#25B68A' }, closedDot: { backgroundColor: '#E4A129' }, rolePill: { height: 44, borderRadius: 11, backgroundColor: '#17365F', paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 8 }, roleText: { color: '#F8F3ED', fontSize: 14, fontWeight: '800' },
   body: { flex: 1, flexDirection: 'row' }, sidebar: { width: 270, borderRightWidth: 1, borderRightColor: '#D9DFE5', paddingTop: 22 }, menuLabel: { color: '#7B8794', fontSize: 13, fontWeight: '800', marginHorizontal: 25, marginBottom: 12 }, nav: { minHeight: 53, paddingHorizontal: 25, gap: 15, flexDirection: 'row', alignItems: 'center', borderRightWidth: 3, borderRightColor: 'transparent' }, navActive: { backgroundColor: '#E2F5F0', borderRightColor: '#25B68A' }, navText: { color: '#647181', fontSize: 16, fontWeight: '600', flex: 1 }, navTextActive: { color: '#176E73', fontWeight: '800' }, badge: { minWidth: 24, height: 24, borderRadius: 12, backgroundColor: '#E87500', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 }, badgeText: { color: '#FFF', fontSize: 11, fontWeight: '800' }, sidebarInfo: { margin: 24, padding: 14, borderRadius: 11, backgroundColor: '#E1F6F0', flexDirection: 'row', gap: 9 }, sidebarInfoText: { flex: 1, color: '#176E73', fontSize: 12, lineHeight: 17 }, logout: { marginTop: 'auto', minHeight: 52, paddingHorizontal: 25, flexDirection: 'row', alignItems: 'center', gap: 12, borderTopWidth: 1, borderTopColor: '#E1E5E9' }, logoutText: { color: '#B44646', fontSize: 15, fontWeight: '800' },
