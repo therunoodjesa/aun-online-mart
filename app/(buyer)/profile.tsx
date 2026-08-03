@@ -11,6 +11,7 @@ import { useAuthStore } from '../../store/authstore';
 type ProfileRow = { full_name: string | null; email: string | null; student_id: string | null; age: number | null; school_year: string | null };
 type MealPlan = { plan_count: number; meals_used_today: number; last_used_on: string | null; requested_plan_count: number | null; request_status: string };
 type ActivityStats = { ordersPlaced: number; favourites: number; amountSpent: number };
+type ActivityResponse = { orders_placed?: number; favourites?: number; amount_spent?: number };
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -46,18 +47,13 @@ export default function ProfilePage() {
   useFocusEffect(useCallback(() => {
     let active = true;
     const loadActivity = async () => {
-      const { data: auth } = await supabase.auth.getUser();
-      if (!auth.user) return;
-      const [{ data: paidOrders, error: ordersError }, { count: favouriteCount, error: favouritesError }] = await Promise.all([
-        supabase.from('orders').select('id, total, amount_paid').eq('user_id', auth.user.id).eq('payment_status', 'paid'),
-        supabase.from('favourites').select('id', { count: 'exact', head: true }).eq('user_id', auth.user.id),
-      ]);
-      if (!active || ordersError || favouritesError) return;
-      const orders = paidOrders ?? [];
+      const { data, error } = await supabase.rpc('get_buyer_profile_activity');
+      if (!active || error) return;
+      const stats = (data ?? {}) as ActivityResponse;
       setActivity({
-        ordersPlaced: orders.length,
-        favourites: favouriteCount ?? 0,
-        amountSpent: orders.reduce((sum, order) => sum + Number(order.total ?? order.amount_paid ?? 0), 0),
+        ordersPlaced: Number(stats.orders_placed ?? 0),
+        favourites: Number(stats.favourites ?? 0),
+        amountSpent: Number(stats.amount_spent ?? 0),
       });
     };
     void loadActivity();
