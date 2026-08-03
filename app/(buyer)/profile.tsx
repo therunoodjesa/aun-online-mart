@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { friendlyError } from '../../lib/user-error';
 import { remainingMealPlanCredits, remainingMealPlanLabel } from '../../lib/meal-plan';
@@ -10,6 +10,7 @@ import { useAuthStore } from '../../store/authstore';
 
 type ProfileRow = { full_name: string | null; email: string | null; student_id: string | null; age: number | null; school_year: string | null };
 type MealPlan = { plan_count: number; meals_used_today: number; last_used_on: string | null; requested_plan_count: number | null; request_status: string };
+type ActivityStats = { ordersPlaced: number; favourites: number; amountSpent: number };
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -23,6 +24,7 @@ export default function ProfilePage() {
   const [studentId, setStudentId] = useState('');
   const [requestedPlans, setRequestedPlans] = useState(0);
   const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
+  const [activity, setActivity] = useState<ActivityStats>({ ordersPlaced: 0, favourites: 0, amountSpent: 0 });
 
   useEffect(() => {
     const load = async () => {
@@ -40,6 +42,27 @@ export default function ProfilePage() {
     };
     void load();
   }, []);
+
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    const loadActivity = async () => {
+      const { data: auth } = await supabase.auth.getUser();
+      if (!auth.user) return;
+      const [{ data: paidOrders, error: ordersError }, { count: favouriteCount, error: favouritesError }] = await Promise.all([
+        supabase.from('orders').select('id, total, amount_paid').eq('user_id', auth.user.id).eq('payment_status', 'paid'),
+        supabase.from('favourites').select('id', { count: 'exact', head: true }).eq('user_id', auth.user.id),
+      ]);
+      if (!active || ordersError || favouritesError) return;
+      const orders = paidOrders ?? [];
+      setActivity({
+        ordersPlaced: orders.length,
+        favourites: favouriteCount ?? 0,
+        amountSpent: orders.reduce((sum, order) => sum + Number(order.total ?? order.amount_paid ?? 0), 0),
+      });
+    };
+    void loadActivity();
+    return () => { active = false; };
+  }, []));
 
   const remainingPlanCredits = remainingMealPlanCredits(mealPlan);
   const usedUp = Boolean(mealPlan?.plan_count && remainingPlanCredits === 0);
@@ -69,7 +92,7 @@ export default function ProfilePage() {
   if (loading) return <View style={styles.loading}><ActivityIndicator size="large" color="#68ECCB" /></View>;
   if (edit !== 'true') return <View style={styles.screen}><StatusBar style="light" /><ScrollView contentContainerStyle={styles.dashboardContent} showsVerticalScrollIndicator={false}>
     <View style={styles.dashboardHero}><TouchableOpacity style={styles.back} onPress={() => router.canGoBack() ? router.back() : router.replace('/(buyer)')}><Ionicons name="arrow-back" size={27} color="#F8F3ED" /></TouchableOpacity><TouchableOpacity style={styles.dashboardAvatar} onPress={() => router.push({ pathname: '/(buyer)/profile', params: { edit: 'true' } })}><Ionicons name="person" size={64} color="#01193D" /><View style={styles.editBadge}><Ionicons name="pencil" size={17} color="#01193D" /></View></TouchableOpacity><Text style={styles.dashboardTitle}>{displayName}’s profile</Text></View>
-    <View style={styles.stats}><View style={styles.stat}><Text style={styles.statValue}>0</Text><Text style={styles.statLabel}>Orders placed</Text></View><View style={styles.stat}><Text style={styles.statValue}>0</Text><Text style={styles.statLabel}>Favourites</Text></View><View style={[styles.stat, { borderRightWidth: 0 }]}><Text style={styles.spentValue}>₦0</Text><Text style={styles.statLabel}>Spent</Text></View></View>
+    <View style={styles.stats}><View style={styles.stat}><Text style={styles.statValue}>{activity.ordersPlaced}</Text><Text style={styles.statLabel}>Orders placed</Text></View><View style={styles.stat}><Text style={styles.statValue}>{activity.favourites}</Text><Text style={styles.statLabel}>Favourites</Text></View><View style={[styles.stat, { borderRightWidth: 0 }]}><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={styles.spentValue}>₦{activity.amountSpent.toLocaleString('en-NG')}</Text><Text style={styles.statLabel}>Spent</Text></View></View>
     <View style={styles.dashboardList}><TouchableOpacity style={styles.dashboardCard} onPress={() => router.push('/(buyer)/favourites')}><View style={[styles.cardIcon, styles.favouriteIcon]}><Ionicons name="heart-outline" size={29} color="#176E73" /></View><View style={styles.cardCopy}><Text style={styles.cardTitle}>Favourites</Text><Text style={styles.cardText}>Saved items and vendors</Text></View></TouchableOpacity><TouchableOpacity style={styles.dashboardCard} onPress={() => router.push('/(buyer)/faq')}><View style={[styles.cardIcon, styles.faqIcon]}><Ionicons name="help-circle-outline" size={31} color="#01193D" /></View><View style={styles.cardCopy}><Text style={styles.cardTitle}>FAQs</Text><Text style={styles.cardText}>Help and support</Text></View></TouchableOpacity><TouchableOpacity style={styles.dashboardCard} onPress={() => router.push('/(buyer)/notifications')}><View style={styles.cardIcon}><Ionicons name="notifications" size={29} color="#01193D" /></View><View style={styles.cardCopy}><Text style={styles.cardTitle}>Notifications</Text><Text style={styles.cardText}>Control updates</Text></View></TouchableOpacity><TouchableOpacity style={styles.dashboardCard} onPress={openWhatsAppSupport}><View style={[styles.cardIcon, styles.supportIcon]}><Ionicons name="logo-whatsapp" size={29} color="#006D50" /></View><View style={styles.cardCopy}><Text style={styles.cardTitle}>WhatsApp support</Text><Text style={styles.cardText}>Message our customer service agent and get a reply within 2 minutes</Text></View></TouchableOpacity></View>
     <TouchableOpacity style={styles.logout} onPress={() => supabase.auth.signOut().then(() => router.replace('/(auth)/login'))}><Ionicons name="log-out-outline" size={28} color="#F10D0D" /><Text style={styles.logoutText}>LOG OUT</Text></TouchableOpacity>
   </ScrollView></View>;
