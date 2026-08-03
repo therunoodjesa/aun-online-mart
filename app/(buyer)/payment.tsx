@@ -9,6 +9,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { useCartStore } from '../../store/cartstore';
 import { supabase } from '../../lib/supabase';
 import { calculateCheckout } from '../../lib/checkout';
+import { remainingMealPlanCredits } from '../../lib/meal-plan';
 import { posthog } from '../../lib/posthog';
 import { getVendorAvailabilityMap } from '../../lib/vendor-availability';
 import { friendlyError } from '../../lib/user-error';
@@ -105,8 +106,8 @@ export default function PaymentPage() {
     const loadMealPlan = async () => {
       const { data: auth } = await supabase.auth.getUser();
       if (!auth.user) return;
-      const { data } = await supabase.from('meal_plan_accounts').select('plan_count').eq('user_id', auth.user.id).maybeSingle();
-      setPlanCount(Number(data?.plan_count ?? 0));
+      const { data } = await supabase.from('meal_plan_accounts').select('plan_count, meals_used_today, last_used_on').eq('user_id', auth.user.id).maybeSingle();
+      setPlanCount(remainingMealPlanCredits(data));
     };
     void loadMealPlan();
   }, []);

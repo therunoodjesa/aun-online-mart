@@ -5,10 +5,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { friendlyError } from '../../lib/user-error';
+import { remainingMealPlanCredits, remainingMealPlanLabel } from '../../lib/meal-plan';
 import { useAuthStore } from '../../store/authstore';
 
 type ProfileRow = { full_name: string | null; email: string | null; student_id: string | null; age: number | null; school_year: string | null };
-type MealPlan = { plan_count: number; meals_used_today: number; requested_plan_count: number | null; request_status: string };
+type MealPlan = { plan_count: number; meals_used_today: number; last_used_on: string | null; requested_plan_count: number | null; request_status: string };
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -29,7 +30,7 @@ export default function ProfilePage() {
       if (!auth.user) { setLoading(false); return; }
       const [{ data: profile }, { data: plan }] = await Promise.all([
         supabase.from('profiles').select('full_name, email, student_id, age, school_year').eq('id', auth.user.id).maybeSingle(),
-        supabase.from('meal_plan_accounts').select('plan_count, meals_used_today, requested_plan_count, request_status').eq('user_id', auth.user.id).maybeSingle(),
+        supabase.from('meal_plan_accounts').select('plan_count, meals_used_today, last_used_on, requested_plan_count, request_status').eq('user_id', auth.user.id).maybeSingle(),
       ]);
       const info = profile as ProfileRow | null;
       setName(info?.full_name || auth.user.user_metadata?.full_name || 'My');
@@ -40,9 +41,10 @@ export default function ProfilePage() {
     void load();
   }, []);
 
-  const usedUp = Boolean(mealPlan?.plan_count && mealPlan.meals_used_today >= mealPlan.plan_count);
+  const remainingPlanCredits = remainingMealPlanCredits(mealPlan);
+  const usedUp = Boolean(mealPlan?.plan_count && remainingPlanCredits === 0);
   const displayName = name.trim().split(/\s+/)[0] || 'My';
-  const planText = usedUp ? 'Meal plan used up today.' : mealPlan?.plan_count ? `${mealPlan.plan_count} meal plan${mealPlan.plan_count === 1 ? '' : 's'} active today` : mealPlan?.request_status === 'pending' ? 'Meal-plan request pending verification' : 'No meal plan available';
+  const planText = mealPlan?.plan_count ? remainingMealPlanLabel(remainingPlanCredits) : mealPlan?.request_status === 'pending' ? 'Meal-plan request pending verification' : 'No meal plan available';
   const openWhatsAppSupport = async () => {
     try {
       await Linking.openURL('https://wa.me/2349133646024');
@@ -60,7 +62,7 @@ export default function ProfilePage() {
     if (authError) { Alert.alert('Profile saved', 'Your details were saved. Your new display name may take a moment to appear; refresh the page if it does not update.'); return; }
     const current = useAuthStore.getState().profile;
     if (current) setProfile({ ...current, full_name: name.trim(), student_id: studentId.trim() || undefined });
-    setMealPlan({ plan_count: mealPlan?.plan_count ?? 0, meals_used_today: mealPlan?.meals_used_today ?? 0, requested_plan_count: requestedPlans, request_status: requestedPlans ? 'pending' : 'not_requested' });
+    setMealPlan({ plan_count: mealPlan?.plan_count ?? 0, meals_used_today: mealPlan?.meals_used_today ?? 0, last_used_on: mealPlan?.last_used_on ?? null, requested_plan_count: requestedPlans, request_status: requestedPlans ? 'pending' : 'not_requested' });
     router.replace('/(buyer)/profile');
   };
 
