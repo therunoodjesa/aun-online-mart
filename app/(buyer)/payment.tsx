@@ -29,7 +29,7 @@ export default function PaymentPage() {
   const { address, directions, slot, fulfilment, mealPlan, reference: returnedReference, trxref } = useLocalSearchParams<{ address?: string; directions?: string; slot?: string; fulfilment?: string; mealPlan?: string; reference?: string; trxref?: string }>();
   const items = useCartStore((state) => state.items);
   const clearCart = useCartStore((state) => state.clearCart);
-  const [method, setMethod] = useState<Method>('paystack');
+  const [method, setMethod] = useState<Method>('transfer');
   const [pickupLocations, setPickupLocations] = useState<PickupLocation[]>([]);
   const [planCount, setPlanCount] = useState(0);
   const [paymentReference, setPaymentReference] = useState('');
