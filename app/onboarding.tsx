@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react';
 import {
   FlatList,
-  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -20,6 +19,11 @@ const COLORS = {
   muted: '#A0A0A0',
   white: '#FFFFFF',
 } as const;
+
+// The onboarding artwork was composed on a 430 × 842 canvas. Scaling this
+// intact composition down on compact screens keeps every detail visible.
+const DESIGN_WIDTH = 430;
+const DESIGN_HEIGHT = 842;
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
@@ -248,6 +252,9 @@ export default function Onboarding() {
   const listRef = useRef<FlatList<Slide>>(null);
   const { width, height } = useWindowDimensions();
   const slideHeight = Math.max(1, height - 90);
+  const presentationScale = Math.min(width / DESIGN_WIDTH, slideHeight / DESIGN_HEIGHT, 1);
+  const canvasWidth = DESIGN_WIDTH * presentationScale;
+  const canvasHeight = DESIGN_HEIGHT * presentationScale;
   const [currentIndex, setCurrentIndex] = useState(0);
 
   const moveTo = (index: number) => {
@@ -259,18 +266,24 @@ export default function Onboarding() {
 
   const renderSlide = ({ item, index }: { item: Slide; index: number }) => (
     <View style={[styles.page, { width, height: slideHeight }]}>
-      <ScrollView style={styles.slideScroll} contentContainerStyle={[styles.slideContent, { minHeight: item.id === 'repeat' ? slideHeight + 230 : slideHeight }]} showsVerticalScrollIndicator={false}>
-        <View style={[styles.topBar, item.id === 'repeat' && { paddingHorizontal: Math.max(30, (width - Math.min(370, width - 60)) / 2) }]}>
+      <View style={[styles.canvasFrame, { width: canvasWidth, height: canvasHeight }]}>
+        <View style={[styles.designCanvas, {
+          left: (canvasWidth - DESIGN_WIDTH) / 2,
+          top: (canvasHeight - DESIGN_HEIGHT) / 2,
+          transform: [{ scale: presentationScale }],
+        }]}>
+        <View style={[styles.topBar, item.id === 'repeat' && { paddingHorizontal: 30 }]}>
           <Text style={styles.step}>{`${index + 1} of ${SLIDES.length}`}</Text>
           <TouchableOpacity onPress={finish} accessibilityRole="button" accessibilityLabel="Skip onboarding" hitSlop={10}>
             <Text style={styles.skip}>Skip</Text>
           </TouchableOpacity>
         </View>
-        {item.id === 'shop' && <ShopSlide slide={item} pageWidth={width} />}
-        {item.id === 'sell' && <SellSlide slide={item} pageWidth={width} />}
-        {item.id === 'deliver' && <DeliverSlide slide={item} pageWidth={width} />}
-        {item.id === 'repeat' && <RepeatSlide slide={item} pageWidth={width} pageHeight={slideHeight} />}
-      </ScrollView>
+        {item.id === 'shop' && <ShopSlide slide={item} pageWidth={DESIGN_WIDTH} />}
+        {item.id === 'sell' && <SellSlide slide={item} pageWidth={DESIGN_WIDTH} />}
+        {item.id === 'deliver' && <DeliverSlide slide={item} pageWidth={DESIGN_WIDTH} />}
+        {item.id === 'repeat' && <RepeatSlide slide={item} pageWidth={DESIGN_WIDTH} pageHeight={DESIGN_HEIGHT} />}
+        </View>
+      </View>
     </View>
   );
 
@@ -312,9 +325,9 @@ export default function Onboarding() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.navy },
   slideList: { flex: 1 },
-  page: { backgroundColor: COLORS.navy, overflow: 'hidden' },
-  slideScroll: { flex: 1 },
-  slideContent: { position: 'relative', paddingBottom: 28 },
+  page: { backgroundColor: COLORS.navy, overflow: 'hidden', alignItems: 'center', justifyContent: 'flex-start' },
+  canvasFrame: { overflow: 'hidden' },
+  designCanvas: { position: 'absolute', width: DESIGN_WIDTH, height: DESIGN_HEIGHT },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 30, paddingTop: 42 },
   step: { color: COLORS.muted, fontSize: 16 },
   skip: { color: COLORS.muted, fontSize: 16, fontWeight: '600' },
