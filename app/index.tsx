@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import {
   View, Image, StyleSheet,
-  Animated, Dimensions
+  Animated, useWindowDimensions
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
@@ -9,11 +9,16 @@ import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authstore';
 import { resolveAccountHome } from '../lib/account-route';
 
-const { width, height } = Dimensions.get('window');
+const logoSource = require('../assets/images/aom-logo.png');
 
 export default function SplashScreen() {
   const router = useRouter();
-  const logoY = useRef(new Animated.Value(-400)).current;
+  const { width, height } = useWindowDimensions();
+  const logoSize = useMemo(() => {
+    const shortestSide = Math.min(width, height);
+    return Math.min(Math.max(shortestSide * 0.62, 180), 340);
+  }, [width, height]);
+  const logoY = useRef(new Animated.Value(-Math.max(height, 500))).current;
   const logoOpacity = useRef(new Animated.Value(0)).current;
   const poweredOpacity = useRef(new Animated.Value(0)).current;
 
@@ -66,13 +71,15 @@ export default function SplashScreen() {
         style={[
           styles.logoWrap,
           {
+            width: logoSize,
+            height: logoSize,
             transform: [{ translateY: logoY }],
             opacity: logoOpacity,
           },
         ]}
       >
         <Image
-          source={require('../assets/images/aom-logo.png')}
+          source={logoSource}
           style={styles.logo}
           resizeMode="contain"
         />
@@ -89,10 +96,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  logoWrap: {
-    width: width * 0.75,
-    height: width * 0.75,
-  },
+  logoWrap: { alignItems: 'center', justifyContent: 'center' },
   logo: {
     width: '100%',
     height: '100%',
