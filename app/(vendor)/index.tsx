@@ -37,6 +37,11 @@ const normaliseSchedule = (value: unknown): WeeklySchedule => {
     return [day, fallback];
   })) as WeeklySchedule;
 };
+const sessionStyles = StyleSheet.create({
+  actions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginTop: 20 },
+  signIn: { minHeight: 50, borderRadius: 10, borderWidth: 1, borderColor: '#01193D', paddingHorizontal: 22, alignItems: 'center', justifyContent: 'center' },
+  signInText: { color: '#01193D', fontSize: 14, fontWeight: '800' },
+});
 const localDateKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const watDateKey = (date = new Date()) => {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Lagos', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date).map((part) => [part.type, part.value]));
@@ -61,10 +66,14 @@ export default function VendorPortal() {
   const [serviceAvailableDates, setServiceAvailableDates] = useState<string[]>([]);
   const [newOrderCount, setNewOrderCount] = useState(0);
   const [savingSchedule, setSavingSchedule] = useState(false);
+  const returnToSignIn = async () => {
+    await supabase.auth.signOut();
+    router.replace('/(auth)/login');
+  };
   const load = async () => {
     setLoading(true); setPortalError('');
     const { data: auth, error: authError } = await supabase.auth.getUser();
-    if (authError || !auth.user) { setPortalError(friendlyError(authError, 'Your session has expired. Sign in again to manage your store.')); setLoading(false); return; }
+    if (authError || !auth.user) { setPortalError('Your sign-in has expired. Please sign in again to continue managing your store.'); setLoading(false); return; }
     const { data: vendorRow, error: vendorError } = await supabase.from('vendors').select('id, name, is_open, store_type, operating_location, description, banner_url, category, location, pickup_location, pickup_instructions, important_message, average_prep_time').eq('owner_id', auth.user.id).maybeSingle();
     if (vendorError) { setPortalError(friendlyError(vendorError, 'We could not open your store. Refresh once. If it still does not open, sign out and back in.')); setLoading(false); return; }
     if (vendorRow) {
@@ -82,6 +91,16 @@ export default function VendorPortal() {
       setServiceAvailableDates(Array.isArray(savedSchedule?.service_available_dates) ? savedSchedule.service_available_dates.map(String) : []);
     }
     setLoading(false);
+  };
+  const retrySession = async () => {
+    setLoading(true);
+    setPortalError('');
+    const { data, error } = await supabase.auth.refreshSession();
+    if (error || !data.session) {
+      await returnToSignIn();
+      return;
+    }
+    await load();
   };
   useEffect(() => { void load(); }, []);
   useEffect(() => {
@@ -181,7 +200,7 @@ export default function VendorPortal() {
     destructive: true,
     onConfirm: async () => { const { error } = await supabase.auth.signOut(); if (error) { Alert.alert('Still signed in', friendlyError(error, 'Check your connection and try logging out again.')); return; } router.replace('/(auth)/login'); },
   });
-  return <View style={styles.screen}><StatusBar style="light" /><View style={[styles.top, compact && styles.topMobile]}><View style={[styles.brand, compact && { flex: 1, minWidth: 0, gap: 8 }]}><Ionicons name="storefront-outline" size={22} color="#68ECCB" /><View style={{ flexShrink: 1 }}><Text numberOfLines={1} style={styles.storeName}>{vendor?.name ?? 'Your store'}</Text><Text style={styles.portal}>Vendor portal</Text></View></View><View style={[styles.topRight, compact && { gap: 6 }]}><View style={[styles.storeState, compact && { height: 38, paddingHorizontal: 9 }]}><View style={[styles.dot, !vendor?.is_open && styles.dotClosed]} /><Text style={[styles.topText, compact && { fontSize: 12 }]}>Store {vendor?.is_open ? 'open' : 'closed'}</Text></View><View style={[styles.avatar, compact && { width: 36, height: 36, borderRadius: 18 }]}><Text style={styles.avatarText}>{(vendor?.name ?? 'VS').slice(0, 2).toUpperCase()}</Text></View></View></View><View style={[styles.main, compact && styles.mainMobile]}><Sidebar page={page} setPage={setPage} newOrderCount={newOrderCount} compact={compact} /><ScrollView style={styles.workspace} contentContainerStyle={[styles.workspaceContent, compact && styles.workspaceContentMobile]} showsVerticalScrollIndicator><PortalInstallBanner />{loading ? <View style={styles.center}><ActivityIndicator size="large" color="#25B68A" /></View> : portalError && !vendor ? <View style={styles.center}><Ionicons name="alert-circle-outline" size={44} color="#9A5B16" /><Text style={styles.emptyTitle}>Your store could not open</Text><Text style={styles.emptyCopy}>{portalError}</Text><TouchableOpacity onPress={() => void load()} style={styles.returnButton}><Text style={styles.returnText}>TRY AGAIN</Text></TouchableOpacity></View> : !vendor ? <VendorApplication /> : <>{portalError ? <View style={styles.applicationFeedback}><Ionicons name="alert-circle-outline" size={18} color="#9A5B16" /><Text style={styles.applicationFeedbackText}>{portalError}</Text></View> : null}{page === 'dashboard' ? <Dashboard vendor={vendor} products={products} onOrders={() => setPage('orders')} /> : page === 'orders' ? <Orders vendor={vendor} /> : page === 'analytics' ? <Analytics /> : page === 'inventory' ? vendor.store_type === 'service' ? <ServiceCatalogue vendor={vendor} services={services} onChanged={load} setOpen={setOpen} /> : <Inventory compact={compact} vendor={vendor} rows={rows} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} counts={counts} setOpen={setOpen} setStatus={setStatus} setStock={setStock} setStockValue={setStockValue} moveProduct={moveProduct} /> : page === 'availability' ? <Availability vendor={vendor} schedule={schedule} setSchedule={setSchedule} serviceAvailableDates={serviceAvailableDates} setServiceAvailableDates={setServiceAvailableDates} setOpen={setOpen} onSave={saveSchedule} saving={savingSchedule} onPause={pauseStore} onCloseForToday={closeForToday} onMarkAllSoldOut={markAllSoldOut} /> : page === 'payouts' ? <Payouts vendor={vendor} /> : page === 'settings' ? <Settings vendor={vendor} onSaved={(details) => setVendor({ ...vendor, ...details })} onLogOut={logOut} /> : <ComingSoon page={page} />}</>}</ScrollView></View></View>;
+  return <View style={styles.screen}><StatusBar style="light" /><View style={[styles.top, compact && styles.topMobile]}><View style={[styles.brand, compact && { flex: 1, minWidth: 0, gap: 8 }]}><Ionicons name="storefront-outline" size={22} color="#68ECCB" /><View style={{ flexShrink: 1 }}><Text numberOfLines={1} style={styles.storeName}>{vendor?.name ?? 'Your store'}</Text><Text style={styles.portal}>Vendor portal</Text></View></View><View style={[styles.topRight, compact && { gap: 6 }]}><View style={[styles.storeState, compact && { height: 38, paddingHorizontal: 9 }]}><View style={[styles.dot, !vendor?.is_open && styles.dotClosed]} /><Text style={[styles.topText, compact && { fontSize: 12 }]}>Store {vendor?.is_open ? 'open' : 'closed'}</Text></View><View style={[styles.avatar, compact && { width: 36, height: 36, borderRadius: 18 }]}><Text style={styles.avatarText}>{(vendor?.name ?? 'VS').slice(0, 2).toUpperCase()}</Text></View></View></View><View style={[styles.main, compact && styles.mainMobile]}><Sidebar page={page} setPage={setPage} newOrderCount={newOrderCount} compact={compact} /><ScrollView style={styles.workspace} contentContainerStyle={[styles.workspaceContent, compact && styles.workspaceContentMobile]} showsVerticalScrollIndicator><PortalInstallBanner />{loading ? <View style={styles.center}><ActivityIndicator size="large" color="#25B68A" /></View> : portalError && !vendor ? <View style={styles.center}><Ionicons name="alert-circle-outline" size={44} color="#9A5B16" /><Text style={styles.emptyTitle}>Sign-in needed</Text><Text style={styles.emptyCopy}>{portalError}</Text><View style={sessionStyles.actions}><TouchableOpacity onPress={() => void retrySession()} style={styles.returnButton}><Text style={styles.returnText}>RETRY</Text></TouchableOpacity><TouchableOpacity onPress={() => void returnToSignIn()} style={sessionStyles.signIn}><Text style={sessionStyles.signInText}>SIGN IN AGAIN</Text></TouchableOpacity></View></View> : !vendor ? <VendorApplication /> : <>{portalError ? <View style={styles.applicationFeedback}><Ionicons name="alert-circle-outline" size={18} color="#9A5B16" /><Text style={styles.applicationFeedbackText}>{portalError}</Text></View> : null}{page === 'dashboard' ? <Dashboard vendor={vendor} products={products} onOrders={() => setPage('orders')} /> : page === 'orders' ? <Orders vendor={vendor} /> : page === 'analytics' ? <Analytics /> : page === 'inventory' ? vendor.store_type === 'service' ? <ServiceCatalogue vendor={vendor} services={services} onChanged={load} setOpen={setOpen} /> : <Inventory compact={compact} vendor={vendor} rows={rows} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} counts={counts} setOpen={setOpen} setStatus={setStatus} setStock={setStock} setStockValue={setStockValue} moveProduct={moveProduct} /> : page === 'availability' ? <Availability vendor={vendor} schedule={schedule} setSchedule={setSchedule} serviceAvailableDates={serviceAvailableDates} setServiceAvailableDates={setServiceAvailableDates} setOpen={setOpen} onSave={saveSchedule} saving={savingSchedule} onPause={pauseStore} onCloseForToday={closeForToday} onMarkAllSoldOut={markAllSoldOut} /> : page === 'payouts' ? <Payouts vendor={vendor} /> : page === 'settings' ? <Settings vendor={vendor} onSaved={(details) => setVendor({ ...vendor, ...details })} onLogOut={logOut} /> : <ComingSoon page={page} />}</>}</ScrollView></View></View>;
 }
 
 function Sidebar({ page, setPage, newOrderCount, compact }: { page: Page; setPage: (page: Page) => void; newOrderCount: number; compact?: boolean }) {
