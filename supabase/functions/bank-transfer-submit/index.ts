@@ -46,6 +46,18 @@ Deno.serve(async (request) => {
     if (cafeteriaItemError) throw new Error(cafeteriaItemError.message);
     await db.from('order_updates').insert({ order_id: order.id, message: 'Bank transfer submitted and awaiting payment confirmation', update_type: 'system' });
     await db.from('payment_intents').update({ order_id: order.id }).eq('id', intent.id);
+    const alertSecret = Deno.env.get('PORTAL_PUSH_INTERNAL_SECRET');
+    const projectUrl = Deno.env.get('SUPABASE_URL');
+    if (alertSecret && projectUrl) {
+      const { data: admins } = await db.from('admin_users').select('user_id');
+      const userIds = (admins ?? []).map((entry) => entry.user_id).filter(Boolean);
+      if (userIds.length) {
+        fetch(`${projectUrl}/functions/v1/portal-push`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Internal-Secret': alertSecret },
+          body: JSON.stringify({ user_ids: userIds, title: 'Transfer waiting for review', body: `${orderNumber} is awaiting payment confirmation.`, url: '/admin-portal', tag: `transfer-${intent.id}` }),
+        }).catch((error) => console.warn('Could not send admin device alert', error));
+      }
+    }
     await captureServerEvent(user.id, 'bank_transfer_submitted', {
       order_id: order.id,
       total: priced.total,

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { supabase } from '../lib/supabase';
 
 type InstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> };
 
@@ -8,6 +9,8 @@ export function PortalInstallBanner() {
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [isIos, setIsIos] = useState(false);
   const [installed, setInstalled] = useState(false);
+  const [alertStatus, setAlertStatus] = useState<'idle' | 'enabling' | 'enabled' | 'unavailable' | 'blocked' | 'error'>('idle');
+  const vapidPublicKey = process.env.EXPO_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY;
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
@@ -21,7 +24,7 @@ export function PortalInstallBanner() {
     return () => { window.removeEventListener('beforeinstallprompt', onBeforeInstall); window.removeEventListener('appinstalled', onInstalled); };
   }, []);
 
-  if (Platform.OS !== 'web' || installed) return null;
+  if (Platform.OS !== 'web') return null;
   const install = async () => {
     if (!installPrompt) return;
     await installPrompt.prompt();
@@ -29,11 +32,55 @@ export function PortalInstallBanner() {
     if (result.outcome === 'accepted') setInstalled(true);
     setInstallPrompt(null);
   };
+  const enableAlerts = async () => {
+    if (!vapidPublicKey || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+      setAlertStatus('unavailable');
+      return;
+    }
+    if (Notification.permission === 'denied') { setAlertStatus('blocked'); return; }
+    try {
+      setAlertStatus('enabling');
+      const registration = await navigator.serviceWorker.ready;
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') { setAlertStatus('blocked'); return; }
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapidPublicKey) });
+      const payload = subscription.toJSON();
+      const { data: auth } = await supabase.auth.getUser();
+      if (!auth.user || !payload.endpoint || !payload.keys?.p256dh || !payload.keys.auth) throw new Error('Please sign in again before enabling alerts.');
+      const { error } = await supabase.from('web_push_subscriptions').upsert({
+        user_id: auth.user.id, endpoint: payload.endpoint, p256dh: payload.keys.p256dh, auth: payload.keys.auth,
+        user_agent: navigator.userAgent, enabled: true, last_error: null, updated_at: new Date().toISOString(),
+      }, { onConflict: 'endpoint' });
+      if (error) throw error;
+      setAlertStatus('enabled');
+    } catch (error) {
+      console.warn('Unable to enable portal alerts', error);
+      setAlertStatus('error');
+    }
+  };
+
+  const installingCopy = isIos
+    ? 'In Safari, tap Share, then Add to Home Screen. Open the installed app to enable alerts.'
+    : 'Install this workspace for faster access to orders, stock and store updates.';
+  const alertCopy = alertStatus === 'enabled' ? 'Order alerts are enabled on this device.'
+    : alertStatus === 'blocked' ? 'Alerts are blocked in this browser. Enable notifications in its site settings, then try again.'
+      : alertStatus === 'unavailable' ? 'Alerts are not configured for this app yet. Ask AOM to finish device alert setup.'
+        : alertStatus === 'error' ? 'We could not save alerts for this device. Check your connection and try again.'
+          : 'Receive a notification as soon as an order needs your attention.';
   return <View style={styles.card}>
     <View style={styles.icon}><Ionicons name="phone-portrait-outline" size={22} color="#176E73" /></View>
-    <View style={styles.copy}><Text style={styles.title}>Use AOM Operations like an app</Text><Text style={styles.text}>{isIos ? 'In Safari, tap Share, then Add to Home Screen. You can enable order alerts once it is installed.' : 'Install this workspace for faster access to orders, stock and store updates.'}</Text></View>
-    {installPrompt ? <TouchableOpacity onPress={() => void install()} style={styles.button}><Text style={styles.buttonText}>Install</Text></TouchableOpacity> : null}
+    <View style={styles.copy}><Text style={styles.title}>{installed ? 'Turn on order alerts' : 'Use AOM Operations like an app'}</Text><Text style={styles.text}>{installed ? alertCopy : installingCopy}</Text></View>
+    {installed && alertStatus !== 'enabled' ? <TouchableOpacity disabled={alertStatus === 'enabling'} onPress={() => void enableAlerts()} style={styles.button}><Text style={styles.buttonText}>{alertStatus === 'enabling' ? 'Enabling…' : 'Enable alerts'}</Text></TouchableOpacity> : null}
+    {!installed && installPrompt ? <TouchableOpacity onPress={() => void install()} style={styles.button}><Text style={styles.buttonText}>Install</Text></TouchableOpacity> : null}
   </View>;
+}
+
+function urlBase64ToUint8Array(value: string) {
+  const padding = '='.repeat((4 - (value.length % 4)) % 4);
+  const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = window.atob(base64);
+  return Uint8Array.from(raw, (character) => character.charCodeAt(0));
 }
 
 const styles = StyleSheet.create({

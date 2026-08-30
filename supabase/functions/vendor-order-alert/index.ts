@@ -14,6 +14,21 @@ type PurchasedItem = {
 const naira = (amount: number) => `₦${Math.round(amount).toLocaleString('en-NG')}`;
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[character] ?? character));
 
+async function sendPortalPush(userId: string | null, title: string, body: string, tag: string) {
+  const secret = Deno.env.get('PORTAL_PUSH_INTERNAL_SECRET');
+  const projectUrl = Deno.env.get('SUPABASE_URL');
+  if (!userId || !secret || !projectUrl) return;
+  try {
+    await fetch(`${projectUrl}/functions/v1/portal-push`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Internal-Secret': secret },
+      body: JSON.stringify({ user_ids: [userId], title, body, url: '/vendor-portal', tag }),
+    });
+  } catch (error) {
+    console.warn('Could not send vendor device alert', error);
+  }
+}
+
 function lineDescription(item: PurchasedItem) {
   const options = (item.options ?? []).map((option) => `${option.quantity && option.quantity > 1 ? `${option.quantity}× ` : ''}${option.name ?? 'Option'}`).join(', ');
   const note = item.notes?.trim();
@@ -80,6 +95,13 @@ Deno.serve(async (request) => {
       const owner = vendor.owner_id ? await db.auth.admin.getUserById(vendor.owner_id) : { data: { user: null } };
       const recipient = owner.data.user?.email ?? null;
       const payload = { order_number: order.order_number, vendor_items: vendorItems, fulfilment, location };
+
+      await sendPortalPush(
+        vendor.owner_id,
+        `New paid order ${order.order_number}`,
+        `${vendorItems.length} item${vendorItems.length === 1 ? '' : 's'} from ${order.order_number} need${vendorItems.length === 1 ? 's' : ''} your attention.`,
+        `order-${order.id}-${vendor.id}`,
+      );
 
       const saveAlert = async (status: 'sent' | 'failed' | 'skipped', extra: Record<string, unknown> = {}) => {
         await db.from('vendor_order_alerts').upsert({

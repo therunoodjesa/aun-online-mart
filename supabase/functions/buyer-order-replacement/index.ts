@@ -3,6 +3,18 @@ import { admin, corsHeaders, getUser, json } from '../_shared/paystack.ts';
 type Alternative = { id: string; name: string; price: number; image_url?: string | null; category?: string | null };
 type RequestBody = { request_id?: string; action?: 'select' | 'cancel'; product_ids?: string[] };
 
+async function sendPortalPush(userId: string | null | undefined, title: string, body: string, tag: string) {
+  const secret = Deno.env.get('PORTAL_PUSH_INTERNAL_SECRET');
+  const projectUrl = Deno.env.get('SUPABASE_URL');
+  if (!userId || !secret || !projectUrl) return;
+  try {
+    await fetch(`${projectUrl}/functions/v1/portal-push`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Internal-Secret': secret },
+      body: JSON.stringify({ user_ids: [userId], title, body, url: '/vendor-portal', tag }),
+    });
+  } catch (error) { console.warn('Could not send replacement device alert', error); }
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (request.method !== 'POST') return json({ error: 'Method not allowed.' }, 405);
@@ -84,6 +96,7 @@ Deno.serve(async (request) => {
         is_read: false,
       });
       if (notificationError) throw new Error(notificationError.message);
+      await sendPortalPush(vendor.owner_id, 'Customer selected replacements', 'The customer has chosen replacement items. Confirm the request before preparing the order.', `replacement-${replacement.id}`);
     }
     return json({ status: 'replacement_selected', selected_products: selected, selected_subtotal: selectedSubtotal, replacement_budget: replacementBudget, refund_amount: refundAmount });
   } catch (error) {
