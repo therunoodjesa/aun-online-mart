@@ -12,7 +12,9 @@ import { posthog } from '../../lib/posthog';
 import { friendlyError } from '../../lib/user-error';
 
 const { width } = Dimensions.get('window');
-const S = width / 430;
+// Keep the mobile design scale on wide web screens instead of multiplying every
+// dimension by the desktop viewport width.
+const S = Math.min(1.08, width / 430);
 
 type Role = 'buyer' | 'vendor';
 
@@ -291,6 +293,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#01193D',
   },
   content: {
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
     paddingHorizontal: 30 * S,
     paddingTop: 52 * S,
     paddingBottom: 48 * S,
