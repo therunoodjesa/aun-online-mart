@@ -95,7 +95,7 @@ export default function MarketplaceProductPage() {
     for (let count = 0; count < quantity; count += 1) {
       addItem({ productId: `${product.id}:${selectionKey}:${note.trim() || 'no-note'}`, name: `${product.name} · ${selection}`, category: vendorName, price: unitPrice, imageUrl: product.image_url, selectedOptions, note: note.trim() || null });
     }
-    setCartToast('added');
+    router.push('/(buyer)/cart');
   };
   const openRelated = (item: Product) => router.push({ pathname: '/(buyer)/marketplace/[vendorId]/[productId]', params: { vendorId: item.vendor_id, productId: item.id } });
   const addRelated = async (item: Product) => {
@@ -106,7 +106,7 @@ export default function MarketplaceProductPage() {
     const { data } = await supabase.from('product_options').select('id').eq('product_id', item.id).eq('is_available', true).limit(1);
     if (data?.length) { openRelated(item); return; }
     addItem({ productId: item.id, name: item.name, category: vendorName, price: item.price, imageUrl: item.image_url });
-    setCartToast('added');
+    router.push('/(buyer)/cart');
   };
 
   if (loading) return <View style={styles.loading}><ActivityIndicator size="large" color="#68ECCB" /></View>;

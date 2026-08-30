@@ -59,7 +59,7 @@ export default function FavouritesPage() {
       return;
     }
     addItem({ productId: item.id, name: item.name, category: item.vendor, price: item.price, imageUrl: item.imageUrl });
-    Alert.alert('Added to cart', `${item.name} is ready in your cart.`);
+    router.push('/(buyer)/cart');
   };
   const openItem = (item: SavedItem) => item.entityType === 'cafeteria_product'
     ? router.push({ pathname: '/(buyer)/cafeteria/[productId]', params: { productId: item.id } })

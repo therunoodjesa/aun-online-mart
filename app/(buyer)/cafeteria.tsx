@@ -61,6 +61,7 @@ export default function CafeteriaPage() {
     const productId = `cafeteria:${item.id}`;
     if (amount > 0) addItem({ productId, name: item.name, category: `Cafeteria · ${item.category}`, price: item.price, imageUrl: item.image_url, mealPlanEligible: item.meal_plan_eligible });
     else changeQuantity(productId, -1);
+    if (amount > 0) router.push('/(buyer)/cart');
   };
   const addOrCustomise = async (item: Product) => {
     if (item.status === 'sold_out' || !serviceOpen) return;

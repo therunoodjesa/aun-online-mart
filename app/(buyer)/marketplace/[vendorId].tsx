@@ -155,9 +155,9 @@ export default function VendorPage() {
       ...prev,
       [id]: Math.max(0, (prev[id] ?? 0) + delta),
     }));
-    if (delta > 0 && product) {
-      addItem({ productId: product.id, name: product.name, category: product.category, price: product.price, imageUrl: product.image_url });
-      setCartToast('added');
+      if (delta > 0 && product) {
+        addItem({ productId: product.id, name: product.name, category: product.category, price: product.price, imageUrl: product.image_url });
+        router.push('/(buyer)/cart');
     } else if (delta < 0) {
       changeQuantity(id, delta);
     }

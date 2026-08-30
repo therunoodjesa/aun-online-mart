@@ -86,7 +86,7 @@ export default function SupermarketProductPage() {
         note: note.trim() || null,
       });
     }
-    setCartToast('added');
+    router.push('/(buyer)/cart');
   };
   const openRecommendation = (item: Product) => router.push({ pathname: '/(buyer)/supermarket/[category]/[productId]', params: { category: category || 'all-products', productId: item.id } });
 

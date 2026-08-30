@@ -62,7 +62,7 @@ export default function CafeteriaProductPage() {
     const choices = selectedOptions.map((option) => option.name).join(' · ') || 'No extras';
     const key = `${product.id}:${selectedOptions.map((option) => option.id).join(':') || 'none'}:${note.trim() || 'no-note'}`;
     for (let index = 0; index < quantity; index += 1) addItem({ productId: `cafeteria:${key}`, name: `${product.name} · ${choices}`, category: `Cafeteria · ${product.category}`, price: unitPrice, imageUrl: product.image_url, mealPlanEligible: product.meal_plan_eligible, selectedOptions: selectedOptions.map((option) => ({ id: option.id, name: option.name, quantity: 1, priceModifier: option.price_modifier })), note: note.trim() || null });
-    setCartToast('added');
+    router.push('/(buyer)/cart');
   };
   const openRelated = (item: Product) => router.push({ pathname: '/(buyer)/cafeteria/[productId]', params: { productId: item.id } });
 

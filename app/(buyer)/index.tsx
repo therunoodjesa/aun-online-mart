@@ -7,6 +7,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authstore';
 import { useCartStore } from '../../store/cartstore';
 import { applyVendorAvailability } from '../../lib/vendor-availability';
+import { searchResultIcon } from '../../lib/search-result-icon';
 
 const COLORS = { navy: '#01193D', mint: '#68ECCB', cream: '#F8F3ED', green: '#005B3B', muted: '#A0A0A0', white: '#FFFFFF', surface: '#FDFBFA' } as const;
 const PROMO_IMAGE = require('../../assets/images/home/jollof-promo.png');
@@ -170,7 +171,10 @@ export default function BuyerHome() {
     setQuantities((current) => ({ ...current, [id]: Math.max(0, (current[id] ?? 0) + amount) }));
     const product = PRODUCTS.find((item) => item.id === id);
     if (!product) return;
-    if (amount > 0) addItem({ productId: product.id, name: product.name, category: product.vendor, price: product.price });
+    if (amount > 0) {
+      addItem({ productId: product.id, name: product.name, category: product.vendor, price: product.price });
+      router.push('/(buyer)/cart');
+    }
     else changeCartQuantity(id, amount);
   };
 
@@ -178,6 +182,7 @@ export default function BuyerHome() {
     const product = PRODUCTS.find((item) => item.id === id);
     if (!product) return;
     addItem({ productId: product.id, name: product.name, category: product.vendor, price: product.price });
+    router.push('/(buyer)/cart');
   };
 
   const openSearchResult = (result: SearchResult) => {
@@ -202,7 +207,7 @@ export default function BuyerHome() {
         <View style={styles.headerTop}><Text numberOfLines={1} style={styles.headerGreeting}>{isSupermarket ? 'Supermarket section' : `${timeGreeting}, ${name}`}</Text><View style={styles.headerActions}><TouchableOpacity style={styles.roundAction} onPress={() => router.push('/(buyer)/notifications')} accessibilityLabel="Open notifications"><Ionicons name="notifications-outline" size={23} color={COLORS.cream} /><View style={styles.badge} /></TouchableOpacity><TouchableOpacity style={styles.roundAction} onPress={() => router.push('/(buyer)/cart')} accessibilityRole="button" accessibilityLabel="Open cart"><Ionicons name="cart-outline" size={23} color={COLORS.cream} />{cartCount > 0 && <View style={styles.cartCount}><Text style={styles.cartCountText}>{cartCount}</Text></View>}</TouchableOpacity></View></View>
         <Text style={styles.headerQuestion}>{isSupermarket ? 'Shop anything' : 'What would you like?'}</Text>
         <View style={styles.search}><Ionicons name="search-outline" size={22} color={COLORS.cream} /><TextInput value={searchQuery} onChangeText={setSearchQuery} placeholder="Search food, vendors, groceries..." placeholderTextColor={COLORS.muted} style={styles.searchInput} autoCapitalize="none" returnKeyType="search" />{searchQuery.length > 0 && <TouchableOpacity onPress={() => setSearchQuery('')}><Ionicons name="close-circle" size={19} color={COLORS.cream} /></TouchableOpacity>}</View>
-        {searchQuery.trim().length >= 2 && <View style={styles.searchResults}>{searching ? <View style={styles.searchState}><ActivityIndicator size="small" color={COLORS.mint} /><Text style={styles.searchStateText}>Searching marketplace…</Text></View> : searchResults.length ? searchResults.map((result) => <TouchableOpacity key={`${result.type}-${result.id}`} style={styles.searchResult} onPress={() => openSearchResult(result)}><View style={styles.searchResultIcon}><Ionicons name={result.type === 'vendor' ? 'storefront-outline' : 'restaurant-outline'} size={20} color={COLORS.navy} /></View><View style={styles.searchResultCopy}><Text numberOfLines={1} style={styles.searchResultTitle}>{result.title}</Text><Text numberOfLines={1} style={styles.searchResultSubtitle}>{result.subtitle}</Text></View><Ionicons name="chevron-forward" size={18} color={COLORS.muted} /></TouchableOpacity>) : <View style={styles.searchState}><Text style={styles.searchStateText}>No matching vendors or items found.</Text></View>}</View>}
+        {searchQuery.trim().length >= 2 && <View style={styles.searchResults}>{searching ? <View style={styles.searchState}><ActivityIndicator size="small" color={COLORS.mint} /><Text style={styles.searchStateText}>Searching marketplace…</Text></View> : searchResults.length ? searchResults.map((result) => <TouchableOpacity key={`${result.type}-${result.id}`} style={styles.searchResult} onPress={() => openSearchResult(result)}><View style={styles.searchResultIcon}><Ionicons name={searchResultIcon(result)} size={20} color={COLORS.navy} /></View><View style={styles.searchResultCopy}><Text numberOfLines={1} style={styles.searchResultTitle}>{result.title}</Text><Text numberOfLines={1} style={styles.searchResultSubtitle}>{result.subtitle}</Text></View><Ionicons name="chevron-forward" size={18} color={COLORS.muted} /></TouchableOpacity>) : <View style={styles.searchState}><Text style={styles.searchStateText}>No matching vendors or items found.</Text></View>}</View>}
       </View>
       <View style={styles.switcher}><TouchableOpacity style={styles.switcherItem} onPress={() => setSection('marketplace')}><Ionicons name="restaurant-outline" size={23} color={COLORS.navy} /><Text style={[styles.switcherText, !isSupermarket && styles.switcherTextActive]}>Marketplace</Text></TouchableOpacity><TouchableOpacity style={styles.switcherItem} onPress={() => setSection('supermarket')}><Ionicons name="storefront-outline" size={23} color={COLORS.navy} /><Text style={[styles.switcherText, isSupermarket && styles.switcherTextActive]}>Supermarket</Text></TouchableOpacity><View style={styles.switchTrack}><View style={[styles.switchFill, isSupermarket && styles.switchFillSupermarket]} /></View></View>
       {isSupermarket ? <View><SupermarketStores vendors={supermarketVendors} width={supermarketVendorWidth} onPress={(vendorId) => router.push({ pathname: '/(buyer)/marketplace/[vendorId]', params: { vendorId } })} /><View style={styles.supermarketGrid}>{SUPERMARKET.map((item) => <TouchableOpacity key={item.label} style={styles.supermarketTileWrap} activeOpacity={0.88} onPress={() => router.push({ pathname: '/(buyer)/supermarket/[category]', params: { category: item.slug } })}><ImageBackground source={item.image} imageStyle={styles.tileImage} style={styles.supermarketTile}><View style={styles.tileShade} /><Text style={styles.tileLabel}>{item.label}</Text></ImageBackground></TouchableOpacity>)}</View> </View> : <View style={styles.body}>

@@ -7,6 +7,7 @@ import { supabase } from '../../../lib/supabase';
 import { useCartStore } from '../../../store/cartstore';
 import { CartToast } from '../../../components/CartToast';
 import { vendorCanAcceptOrders } from '../../../lib/vendor-availability';
+import { searchResultIcon } from '../../../lib/search-result-icon';
 
 const COLORS = { navy: '#01193D', mint: '#68ECCB', cream: '#F8F3ED', white: '#FFFFFF', muted: '#A0A0A0' } as const;
 const ALL_PRODUCTS_IMAGE = require('../../../assets/images/home/all-products.png');
@@ -134,7 +135,10 @@ export default function SupermarketCategoryPage() {
   const openProduct = (product: Product) => router.push({ pathname: '/(buyer)/supermarket/[category]/[productId]', params: { category: key, productId: product.id } });
   const updateQuantity = (product: Product, amount: number) => {
     if (product.status !== 'available') return;
-    if (amount > 0) { addItem({ productId: product.id, name: product.name, category: product.category, price: product.price, imageUrl: product.image_url }); setCartToast('added'); }
+    if (amount > 0) {
+      addItem({ productId: product.id, name: product.name, category: product.category, price: product.price, imageUrl: product.image_url });
+      router.push('/(buyer)/cart');
+    }
     else changeQuantity(product.id, -1);
   };
   const addOrCustomise = async (product: Product) => {
@@ -175,7 +179,7 @@ export default function SupermarketCategoryPage() {
               </View>
             </View>
             <View style={styles.search}><Ionicons name="search-outline" size={20} color={COLORS.cream} /><TextInput value={query} onChangeText={setQuery} placeholder="Search food, vendors, groceries..." placeholderTextColor="rgba(248,243,237,0.58)" style={styles.searchInput} /></View>
-            {query.trim().length >= 2 && <View style={styles.searchResults}>{searching ? <View style={styles.searchState}><ActivityIndicator size="small" color={COLORS.mint} /><Text style={styles.searchStateText}>Searching AUN Online Mart…</Text></View> : searchResults.length ? searchResults.map((result) => <TouchableOpacity key={`${result.type}-${result.id}`} style={styles.searchResult} onPress={() => openSearchResult(result)}><Ionicons name={result.type === 'vendor' ? 'storefront-outline' : 'bag-handle-outline'} size={19} color={COLORS.navy} /><View style={styles.resultCopy}><Text numberOfLines={1} style={styles.resultTitle}>{result.title}</Text><Text numberOfLines={1} style={styles.resultSubtitle}>{result.subtitle}</Text></View><Ionicons name="chevron-forward" size={18} color={COLORS.muted} /></TouchableOpacity>) : <View style={styles.searchState}><Text style={styles.searchStateText}>No matching products or vendors.</Text></View>}</View>}
+            {query.trim().length >= 2 && <View style={styles.searchResults}>{searching ? <View style={styles.searchState}><ActivityIndicator size="small" color={COLORS.mint} /><Text style={styles.searchStateText}>Searching AUN Online Mart…</Text></View> : searchResults.length ? searchResults.map((result) => <TouchableOpacity key={`${result.type}-${result.id}`} style={styles.searchResult} onPress={() => openSearchResult(result)}><Ionicons name={searchResultIcon(result)} size={19} color={COLORS.navy} /><View style={styles.resultCopy}><Text numberOfLines={1} style={styles.resultTitle}>{result.title}</Text><Text numberOfLines={1} style={styles.resultSubtitle}>{result.subtitle}</Text></View><Ionicons name="chevron-forward" size={18} color={COLORS.muted} /></TouchableOpacity>) : <View style={styles.searchState}><Text style={styles.searchStateText}>No matching products or vendors.</Text></View>}</View>}
           </View>
           <View style={styles.banner}>
             <Image source={categoryImageUrl ? { uri: categoryImageUrl } : config.banner} style={styles.bannerImage} resizeMode="cover" />

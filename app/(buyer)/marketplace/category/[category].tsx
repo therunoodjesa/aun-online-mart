@@ -58,7 +58,10 @@ export default function MarketplaceCategoryPage() {
   const updateQuantity = (product: CategoryProduct, amount: number) => {
     if (product.status !== 'available') return;
     setQuantities((current) => ({ ...current, [product.id]: Math.max(0, (current[product.id] ?? 0) + amount) }));
-    if (amount > 0) { addItem({ productId: product.id, name: product.name, category: product.marketplace_subcategory ?? product.category, price: product.price, imageUrl: product.image_url }); setCartToast('added'); }
+    if (amount > 0) {
+      addItem({ productId: product.id, name: product.name, category: product.marketplace_subcategory ?? product.category, price: product.price, imageUrl: product.image_url });
+      router.push('/(buyer)/cart');
+    }
     else changeQuantity(product.id, amount);
   };
   const openProduct = (product: CategoryProduct) => router.push({ pathname: '/(buyer)/marketplace/[vendorId]/[productId]', params: { vendorId: product.vendor_id, productId: product.id } });
