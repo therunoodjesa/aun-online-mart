@@ -60,6 +60,13 @@ export default function Signup() {
       return;
     }
     if (data.user) {
+      // The Auth profile keeps phone in metadata. This mirrors it to the
+      // operational profile row immediately, while the database trigger
+      // covers future Auth-side changes as well.
+      const profilePatch: { full_name: string; phone?: string } = { full_name: fullName.trim() };
+      if (phone.trim()) profilePatch.phone = phone.trim();
+      const { error: profileError } = await supabase.from('profiles').update(profilePatch).eq('id', data.user.id);
+      if (profileError) posthog.captureException(profileError, { flow: 'signup_profile_phone_sync' });
       posthog.identify(data.user.id, {
         email: data.user.email ?? null,
         full_name: fullName,
