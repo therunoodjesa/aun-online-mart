@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#01193D"/>
+  <path d="M125 224h262l-18 181H143l-18-181Zm39-81h184l39 81H125l39-81Zm33 0 17-36h84l17 36" fill="none" stroke="#68ECCB" stroke-width="25" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="256" y="351" text-anchor="middle" fill="#F8F3ED" font-family="Arial,sans-serif" font-size="98" font-weight="700">AOM</text>
+</svg>

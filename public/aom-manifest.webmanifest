@@ -1,0 +1,14 @@
+{
+  "id": "/vendor-portal",
+  "name": "AOM Operations",
+  "short_name": "AOM Ops",
+  "description": "AUN Online Mart vendor and administrator operations workspace.",
+  "start_url": "/vendor-portal",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#01193D",
+  "theme_color": "#01193D",
+  "icons": [
+    { "src": "/aom-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
