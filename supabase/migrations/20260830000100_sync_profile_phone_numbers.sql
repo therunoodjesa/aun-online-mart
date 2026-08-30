@@ -4,6 +4,12 @@
 alter table public.profiles
   add column if not exists phone text;
 
+-- Older projects may already have phone as numeric. Phone numbers are
+-- identifiers, not quantities: text preserves leading zeroes and supports
+-- country-code formats such as +234.
+alter table public.profiles
+  alter column phone type text using nullif(phone::text, '');
+
 -- Backfill accounts that already have a number from password sign-up,
 -- phone sign-in, or an earlier metadata update. Never overwrite a profile
 -- number that has already been deliberately set.
