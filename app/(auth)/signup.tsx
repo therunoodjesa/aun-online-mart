@@ -12,9 +12,8 @@ import { posthog } from '../../lib/posthog';
 import { friendlyError } from '../../lib/user-error';
 
 const { width } = Dimensions.get('window');
-// Keep the mobile design scale on wide web screens instead of multiplying every
-// dimension by the desktop viewport width.
-const S = Math.min(1.08, width / 430);
+// Match the login screen's scale on desktop and mobile.
+const S = width / 430;
 
 type Role = 'buyer' | 'vendor';
 
@@ -294,8 +293,6 @@ const styles = StyleSheet.create({
   },
   content: {
     width: '100%',
-    maxWidth: 520,
-    alignSelf: 'center',
     paddingHorizontal: 30 * S,
     paddingTop: 52 * S,
     paddingBottom: 48 * S,
@@ -361,7 +358,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13 * S,
     color: '#68ECCB',
-    lineHeight: 18,
+    lineHeight: 18 * S,
   },
 
   // FIELD
