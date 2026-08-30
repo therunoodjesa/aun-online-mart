@@ -104,11 +104,12 @@ export default function VendorPortal() {
   };
   useEffect(() => { void load(); }, []);
   useEffect(() => {
+    if (!vendor?.id) { setNewOrderCount(0); return; }
     let active = true;
-    const refreshOrderNotice = async () => { const orders = await loadVendorOrders(); if (active) setNewOrderCount(orders.filter((order) => order.status === 'pending' || order.status === 'replacement_selected').length); };
+    const refreshOrderNotice = async () => { const orders = await loadVendorOrders(vendor.id); if (active) setNewOrderCount(orders.filter((order) => order.status === 'pending' || order.status === 'replacement_selected').length); };
     void refreshOrderNotice();
     return () => { active = false; };
-  }, []);
+  }, [vendor?.id]);
   const counts = useMemo(() => ({ all: products.length, available: products.filter((p) => p.status === 'available').length, sold_out: products.filter((p) => p.status === 'sold_out').length, hidden: products.filter((p) => p.status === 'hidden').length }), [products]);
   const rows = useMemo(() => products.filter((p) => (filter === 'all' || p.status === filter) && p.name.toLowerCase().includes(search.toLowerCase())), [products, filter, search]);
   const setOpen = async (is_open: boolean) => {
@@ -200,7 +201,7 @@ export default function VendorPortal() {
     destructive: true,
     onConfirm: async () => { const { error } = await supabase.auth.signOut(); if (error) { Alert.alert('Still signed in', friendlyError(error, 'Check your connection and try logging out again.')); return; } router.replace('/(auth)/login'); },
   });
-  return <View style={styles.screen}><StatusBar style="light" /><View style={[styles.top, compact && styles.topMobile]}><View style={[styles.brand, compact && { flex: 1, minWidth: 0, gap: 8 }]}><Ionicons name="storefront-outline" size={22} color="#68ECCB" /><View style={{ flexShrink: 1 }}><Text numberOfLines={1} style={styles.storeName}>{vendor?.name ?? 'Your store'}</Text><Text style={styles.portal}>Vendor portal</Text></View></View><View style={[styles.topRight, compact && { gap: 6 }]}><View style={[styles.storeState, compact && { height: 38, paddingHorizontal: 9 }]}><View style={[styles.dot, !vendor?.is_open && styles.dotClosed]} /><Text style={[styles.topText, compact && { fontSize: 12 }]}>Store {vendor?.is_open ? 'open' : 'closed'}</Text></View><View style={[styles.avatar, compact && { width: 36, height: 36, borderRadius: 18 }]}><Text style={styles.avatarText}>{(vendor?.name ?? 'VS').slice(0, 2).toUpperCase()}</Text></View></View></View><View style={[styles.main, compact && styles.mainMobile]}><Sidebar page={page} setPage={setPage} newOrderCount={newOrderCount} compact={compact} /><ScrollView style={styles.workspace} contentContainerStyle={[styles.workspaceContent, compact && styles.workspaceContentMobile]} showsVerticalScrollIndicator><PortalInstallBanner />{loading ? <View style={styles.center}><ActivityIndicator size="large" color="#25B68A" /></View> : portalError && !vendor ? <View style={styles.center}><Ionicons name="alert-circle-outline" size={44} color="#9A5B16" /><Text style={styles.emptyTitle}>Sign-in needed</Text><Text style={styles.emptyCopy}>{portalError}</Text><View style={sessionStyles.actions}><TouchableOpacity onPress={() => void retrySession()} style={styles.returnButton}><Text style={styles.returnText}>RETRY</Text></TouchableOpacity><TouchableOpacity onPress={() => void returnToSignIn()} style={sessionStyles.signIn}><Text style={sessionStyles.signInText}>SIGN IN AGAIN</Text></TouchableOpacity></View></View> : !vendor ? <VendorApplication /> : <>{portalError ? <View style={styles.applicationFeedback}><Ionicons name="alert-circle-outline" size={18} color="#9A5B16" /><Text style={styles.applicationFeedbackText}>{portalError}</Text></View> : null}{page === 'dashboard' ? <Dashboard vendor={vendor} products={products} onOrders={() => setPage('orders')} /> : page === 'orders' ? <Orders vendor={vendor} /> : page === 'analytics' ? <Analytics /> : page === 'inventory' ? vendor.store_type === 'service' ? <ServiceCatalogue vendor={vendor} services={services} onChanged={load} setOpen={setOpen} /> : <Inventory compact={compact} vendor={vendor} rows={rows} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} counts={counts} setOpen={setOpen} setStatus={setStatus} setStock={setStock} setStockValue={setStockValue} moveProduct={moveProduct} /> : page === 'availability' ? <Availability vendor={vendor} schedule={schedule} setSchedule={setSchedule} serviceAvailableDates={serviceAvailableDates} setServiceAvailableDates={setServiceAvailableDates} setOpen={setOpen} onSave={saveSchedule} saving={savingSchedule} onPause={pauseStore} onCloseForToday={closeForToday} onMarkAllSoldOut={markAllSoldOut} /> : page === 'payouts' ? <Payouts vendor={vendor} /> : page === 'settings' ? <Settings vendor={vendor} onSaved={(details) => setVendor({ ...vendor, ...details })} onLogOut={logOut} /> : <ComingSoon page={page} />}</>}</ScrollView></View></View>;
+  return <View style={styles.screen}><StatusBar style="light" /><View style={[styles.top, compact && styles.topMobile]}><View style={[styles.brand, compact && { flex: 1, minWidth: 0, gap: 8 }]}><Ionicons name="storefront-outline" size={22} color="#68ECCB" /><View style={{ flexShrink: 1 }}><Text numberOfLines={1} style={styles.storeName}>{vendor?.name ?? 'Your store'}</Text><Text style={styles.portal}>Vendor portal</Text></View></View><View style={[styles.topRight, compact && { gap: 6 }]}><View style={[styles.storeState, compact && { height: 38, paddingHorizontal: 9 }]}><View style={[styles.dot, !vendor?.is_open && styles.dotClosed]} /><Text style={[styles.topText, compact && { fontSize: 12 }]}>Store {vendor?.is_open ? 'open' : 'closed'}</Text></View><View style={[styles.avatar, compact && { width: 36, height: 36, borderRadius: 18 }]}><Text style={styles.avatarText}>{(vendor?.name ?? 'VS').slice(0, 2).toUpperCase()}</Text></View></View></View><View style={[styles.main, compact && styles.mainMobile]}><Sidebar page={page} setPage={setPage} newOrderCount={newOrderCount} compact={compact} /><ScrollView style={styles.workspace} contentContainerStyle={[styles.workspaceContent, compact && styles.workspaceContentMobile]} showsVerticalScrollIndicator><PortalInstallBanner />{loading ? <View style={styles.center}><ActivityIndicator size="large" color="#25B68A" /></View> : portalError && !vendor ? <View style={styles.center}><Ionicons name="alert-circle-outline" size={44} color="#9A5B16" /><Text style={styles.emptyTitle}>Sign-in needed</Text><Text style={styles.emptyCopy}>{portalError}</Text><View style={sessionStyles.actions}><TouchableOpacity onPress={() => void retrySession()} style={styles.returnButton}><Text style={styles.returnText}>RETRY</Text></TouchableOpacity><TouchableOpacity onPress={() => void returnToSignIn()} style={sessionStyles.signIn}><Text style={sessionStyles.signInText}>SIGN IN AGAIN</Text></TouchableOpacity></View></View> : !vendor ? <VendorApplication /> : <>{portalError ? <View style={styles.applicationFeedback}><Ionicons name="alert-circle-outline" size={18} color="#9A5B16" /><Text style={styles.applicationFeedbackText}>{portalError}</Text></View> : null}{page === 'dashboard' ? <Dashboard vendor={vendor} products={products} onOrders={() => setPage('orders')} /> : page === 'orders' ? <Orders vendor={vendor} /> : page === 'analytics' ? <Analytics vendor={vendor} /> : page === 'inventory' ? vendor.store_type === 'service' ? <ServiceCatalogue vendor={vendor} services={services} onChanged={load} setOpen={setOpen} /> : <Inventory compact={compact} vendor={vendor} rows={rows} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} counts={counts} setOpen={setOpen} setStatus={setStatus} setStock={setStock} setStockValue={setStockValue} moveProduct={moveProduct} /> : page === 'availability' ? <Availability vendor={vendor} schedule={schedule} setSchedule={setSchedule} serviceAvailableDates={serviceAvailableDates} setServiceAvailableDates={setServiceAvailableDates} setOpen={setOpen} onSave={saveSchedule} saving={savingSchedule} onPause={pauseStore} onCloseForToday={closeForToday} onMarkAllSoldOut={markAllSoldOut} /> : page === 'payouts' ? <Payouts vendor={vendor} /> : page === 'settings' ? <Settings vendor={vendor} onSaved={(details) => setVendor({ ...vendor, ...details })} onLogOut={logOut} /> : <ComingSoon page={page} />}</>}</ScrollView></View></View>;
 }
 
 function Sidebar({ page, setPage, newOrderCount, compact }: { page: Page; setPage: (page: Page) => void; newOrderCount: number; compact?: boolean }) {
@@ -308,8 +309,15 @@ type RejectionReason = 'out_of_stock' | 'store_closed' | 'cannot_meet_request' |
 type ReplacementProduct = { id: string; name: string; price: number; category: string | null; image_url: string | null };
 type PayoutRequest = { id: string; amount: number; order_ids: string[]; status: 'requested' | 'processing' | 'paid' | 'rejected'; requested_at: string; processed_at: string | null; reference: string | null };
 
-async function loadVendorOrders(): Promise<VendorOrder[]> {
-  const { data: lines } = await supabase.from('order_items').select('order_id, product_name, quantity, unit_price, notes');
+async function loadVendorOrders(vendorId: string): Promise<VendorOrder[]> {
+  // Fetch only this store's purchased items. Relying on an unfiltered order-items
+  // query made the small-screen portal intermittently render an empty order list.
+  const { data: catalogue, error: catalogueError } = await supabase.from('products').select('id').eq('vendor_id', vendorId);
+  if (catalogueError) { console.warn('Could not load this store catalogue for orders', catalogueError); return []; }
+  const productIds = (catalogue ?? []).map((product) => product.id);
+  if (!productIds.length) return [];
+  const { data: lines, error: linesError } = await supabase.from('order_items').select('order_id, product_id, product_name, quantity, unit_price, notes').in('product_id', productIds);
+  if (linesError) { console.warn('Could not load this store orders', linesError); return []; }
   const ids = [...new Set((lines ?? []).map((line) => line.order_id))];
   if (!ids.length) return [];
   const [{ data: orders }, { data: replacements }] = await Promise.all([
@@ -329,7 +337,7 @@ async function loadVendorOrders(): Promise<VendorOrder[]> {
 
 function Dashboard({ vendor, products, onOrders }: { vendor: Vendor; products: Product[]; onOrders: () => void }) {
   const [orders, setOrders] = useState<VendorOrder[]>([]);
-  useEffect(() => { void loadVendorOrders().then(setOrders); }, []);
+  useEffect(() => { void loadVendorOrders(vendor.id).then(setOrders); }, [vendor.id]);
   const pending = orders.filter((order) => order.status === 'pending').length;
   const sales = orders.reduce((total, order) => total + order.items.reduce((sum, item) => sum + (item.isReplacement ? 0 : item.unit_price * item.quantity), 0), 0);
   return <View style={styles.portalPage}><Head title={`Good day, ${vendor.name}`} subtitle="Your store summary is up to date." /><View style={styles.metricRow}><Metric label="New orders" value={String(pending)} /><Metric label="Available items" value={String(products.filter((item) => item.status === 'available').length)} /><Metric label="Order value" value={`₦${sales.toLocaleString('en-NG')}`} /></View><View style={styles.dashboardSection}><View style={styles.sectionTop}><Text style={styles.sectionTitle}>Incoming orders</Text><TouchableOpacity onPress={onOrders}><Text style={styles.link}>View all</Text></TouchableOpacity></View>{orders.length ? orders.slice(0, 3).map((order) => <OrderPreview key={order.id} order={order} />) : <EmptyOrders />}</View></View>;
@@ -345,7 +353,7 @@ function Orders({ vendor }: { vendor: Vendor }) {
   const [selectedAlternativeIds, setSelectedAlternativeIds] = useState<string[]>([]);
   const [submittingRejection, setSubmittingRejection] = useState(false);
   const [actionNotice, setActionNotice] = useState('');
-  const load = async (showLoading = false) => { if (showLoading) setLoading(true); setOrders(await loadVendorOrders()); if (showLoading) setLoading(false); };
+  const load = async (showLoading = false) => { if (showLoading) setLoading(true); setOrders(await loadVendorOrders(vendor.id)); if (showLoading) setLoading(false); };
   useEffect(() => { void load(true); }, [vendor.id]);
   useEffect(() => {
     const refresh = () => { void load(false); };
@@ -419,7 +427,7 @@ function Payouts({ vendor }: { vendor: Vendor }) {
   const load = async () => {
     setLoading(true);
     const [orderRows, requestRows] = await Promise.all([
-      loadVendorOrders(),
+      loadVendorOrders(vendor.id),
       supabase.from('vendor_payout_requests').select('id, amount, order_ids, status, requested_at, processed_at, reference').eq('vendor_id', vendor.id).order('requested_at', { ascending: false }),
     ]);
     setOrders(orderRows);
@@ -483,18 +491,13 @@ function Settings({ vendor, onSaved, onLogOut }: { vendor: Vendor; onSaved: (det
 function SettingsField({ label, multiline, ...props }: { label: string; multiline?: boolean } & React.ComponentProps<typeof TextInput>) { return <View style={styles.settingsField}><Text style={styles.fieldLabel}>{label}</Text><TextInput {...props} multiline={multiline} placeholderTextColor="#99A0AA" style={[styles.settingsInput, multiline && styles.settingsTextArea]} /></View>; }
 function ComingSoon({ page }: { page: Page }) { return <View style={styles.center}><Ionicons name="construct-outline" size={44} color="#176E73" /><Text style={styles.emptyTitle}>{page[0].toUpperCase() + page.slice(1)} is next</Text><Text style={styles.emptyCopy}>We are building this section after the order workflow.</Text></View>; }
 
-function Analytics() {
+function Analytics({ vendor }: { vendor: Vendor }) {
   const [orders, setOrders] = useState<VendorOrder[]>([]);
   const [range, setRange] = useState<7 | 30 | 'all'>(7);
   const [loading, setLoading] = useState(true);
-  const [storeName, setStoreName] = useState('Your store');
-  const [isService, setIsService] = useState(false);
-  useEffect(() => { void (async () => {
-    const { data: auth } = await supabase.auth.getUser();
-    const { data: vendor } = await supabase.from('vendors').select('name, store_type').eq('owner_id', auth.user?.id ?? '').maybeSingle();
-    if (vendor) { setStoreName(vendor.name || 'Your store'); setIsService(vendor.store_type === 'service'); }
-    setOrders(await loadVendorOrders()); setLoading(false);
-  })(); }, []);
+  const storeName = vendor.name || 'Your store';
+  const isService = vendor.store_type === 'service';
+  useEffect(() => { void (async () => { setLoading(true); setOrders(await loadVendorOrders(vendor.id)); setLoading(false); })(); }, [vendor.id]);
   const cutoff = range === 'all' ? 0 : Date.now() - range * 24 * 60 * 60 * 1000;
   const scoped = orders.filter((order) => !cutoff || new Date(order.created_at).getTime() >= cutoff);
   const paidOrders = scoped.filter((order) => !['cancelled', 'rejected'].includes(order.status));

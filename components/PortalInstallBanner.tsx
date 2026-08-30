@@ -33,13 +33,14 @@ export function PortalInstallBanner() {
     setInstallPrompt(null);
   };
   const enableAlerts = async () => {
-    if (!vapidPublicKey || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    if (!vapidPublicKey || !window.isSecureContext || !('serviceWorker' in navigator) || !('PushManager' in window)) {
       setAlertStatus('unavailable');
       return;
     }
     if (Notification.permission === 'denied') { setAlertStatus('blocked'); return; }
     try {
       setAlertStatus('enabling');
+      await navigator.serviceWorker.register('/aom-sw.js', { scope: '/' });
       const registration = await navigator.serviceWorker.ready;
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') { setAlertStatus('blocked'); return; }
@@ -60,18 +61,19 @@ export function PortalInstallBanner() {
     }
   };
 
+  const canEnableAlerts = !isIos || installed;
   const installingCopy = isIos
     ? 'In Safari, tap Share, then Add to Home Screen. Open the installed app to enable alerts.'
     : 'Install this workspace for faster access to orders, stock and store updates.';
   const alertCopy = alertStatus === 'enabled' ? 'Order alerts are enabled on this device.'
     : alertStatus === 'blocked' ? 'Alerts are blocked in this browser. Enable notifications in its site settings, then try again.'
-      : alertStatus === 'unavailable' ? 'Alerts are not configured for this app yet. Ask AOM to finish device alert setup.'
+      : alertStatus === 'unavailable' ? 'Alerts need a secure browser and AOM’s device-alert key. Use the deployed portal, not a preview or in-app browser.'
         : alertStatus === 'error' ? 'We could not save alerts for this device. Check your connection and try again.'
           : 'Receive a notification as soon as an order needs your attention.';
   return <View style={styles.card}>
     <View style={styles.icon}><Ionicons name="phone-portrait-outline" size={22} color="#176E73" /></View>
-    <View style={styles.copy}><Text style={styles.title}>{installed ? 'Turn on order alerts' : 'Use AOM Operations like an app'}</Text><Text style={styles.text}>{installed ? alertCopy : installingCopy}</Text></View>
-    {installed && alertStatus !== 'enabled' ? <TouchableOpacity disabled={alertStatus === 'enabling'} onPress={() => void enableAlerts()} style={styles.button}><Text style={styles.buttonText}>{alertStatus === 'enabling' ? 'Enabling…' : 'Enable alerts'}</Text></TouchableOpacity> : null}
+    <View style={styles.copy}><Text style={styles.title}>{canEnableAlerts ? 'Turn on order alerts' : 'Use AOM Operations like an app'}</Text><Text style={styles.text}>{canEnableAlerts ? alertCopy : installingCopy}</Text></View>
+    {canEnableAlerts && alertStatus !== 'enabled' ? <TouchableOpacity disabled={alertStatus === 'enabling'} onPress={() => void enableAlerts()} style={styles.button}><Text style={styles.buttonText}>{alertStatus === 'enabling' ? 'Enabling…' : 'Enable alerts'}</Text></TouchableOpacity> : null}
     {!installed && installPrompt ? <TouchableOpacity onPress={() => void install()} style={styles.button}><Text style={styles.buttonText}>Install</Text></TouchableOpacity> : null}
   </View>;
 }
