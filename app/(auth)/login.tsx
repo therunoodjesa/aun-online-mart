@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  TextInput, ScrollView, Alert,
+  TextInput, ScrollView,
   KeyboardAvoidingView, Platform, Dimensions
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -9,7 +9,6 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authstore';
-import { beginGoogleSignIn } from '../../lib/google-auth';
 import { resolveAccountHome } from '../../lib/account-route';
 import { posthog } from '../../lib/posthog';
 import { friendlyError } from '../../lib/user-error';
@@ -24,7 +23,6 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -55,13 +53,6 @@ export default function Login() {
       await fetchProfile(data.user.id);
       router.replace(await resolveAccountHome(data.user));
     }
-  };
-
-  const handleGoogleLogin = async () => {
-    setGoogleLoading(true);
-    try { await beginGoogleSignIn(); }
-    catch (error) { posthog.captureException(error, { flow: 'google_login' }); Alert.alert('Google sign-in did not finish', friendlyError(error instanceof Error ? error : null, 'Close the Google window, check your internet connection, and try again.')); }
-    finally { setGoogleLoading(false); }
   };
 
   return (
@@ -147,11 +138,11 @@ export default function Login() {
           <View style={styles.dividerLine} />
         </View>
 
-        {/* Google */}
-        <TouchableOpacity style={[styles.googleBtn, googleLoading && { opacity: 0.6 }]} onPress={handleGoogleLogin} disabled={googleLoading}>
-          <Ionicons name="logo-google" size={18 * S} color="#F8F3ED" />
-          <Text style={styles.googleText}>{googleLoading ? 'Opening Google…' : 'Continue with Google'}</Text>
-        </TouchableOpacity>
+        <View style={[styles.googleBtn, styles.googleUnavailable]}>
+          <Ionicons name="logo-google" size={18 * S} color="#C9D4E3" />
+          <Text style={styles.googleText}>Google sign-in is temporarily unavailable</Text>
+        </View>
+        <Text style={styles.googleUnavailableHint}>Please use your email and password to continue.</Text>
 
         {/* Login button */}
         <TouchableOpacity
@@ -298,6 +289,17 @@ const styles = StyleSheet.create({
     fontSize: 16 * S,
     fontWeight: '500',
     color: '#F8F3ED',
+  },
+  googleUnavailable: {
+    opacity: 0.72,
+    marginBottom: 7 * S,
+  },
+  googleUnavailableHint: {
+    color: '#C9D4E3',
+    textAlign: 'center',
+    fontSize: 12 * S,
+    lineHeight: 17 * S,
+    marginBottom: 14 * S,
   },
   submitBtn: {
     backgroundColor: '#FFFFFF',

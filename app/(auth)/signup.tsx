@@ -8,7 +8,6 @@ import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
-import { beginGoogleSignIn } from '../../lib/google-auth';
 import { posthog } from '../../lib/posthog';
 import { friendlyError } from '../../lib/user-error';
 
@@ -27,7 +26,6 @@ export default function Signup() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
 
   const isAunEmail = email.endsWith('@aun.edu.ng');
 
@@ -76,13 +74,6 @@ export default function Signup() {
     }
     posthog.capture('user_signed_up', { role, is_aun_student: isAunEmail, method: 'password' });
     router.replace(role === 'vendor' ? '/vendor-portal' : '/(buyer)/');
-  };
-
-  const handleGoogleSignup = async () => {
-    setGoogleLoading(true);
-    try { await beginGoogleSignIn(); }
-    catch (error) { posthog.captureException(error, { flow: 'google_signup', role }); Alert.alert('Google sign-up did not finish', friendlyError(error instanceof Error ? error : null, 'Close the Google window, check your internet connection, and try again.')); }
-    finally { setGoogleLoading(false); }
   };
 
   return (
@@ -245,11 +236,11 @@ export default function Signup() {
           <View style={styles.dividerLine} />
         </View>
 
-        {/* Google */}
-        <TouchableOpacity style={[styles.googleBtn, googleLoading && { opacity: 0.6 }]} onPress={handleGoogleSignup} disabled={googleLoading}>
-          <Ionicons name="logo-google" size={18 * S} color="#F8F3ED" />
-          <Text style={styles.googleText}>{googleLoading ? 'Opening Google…' : 'Continue with Google'}</Text>
-        </TouchableOpacity>
+        <View style={[styles.googleBtn, styles.googleUnavailable]}>
+          <Ionicons name="logo-google" size={18 * S} color="#C9D4E3" />
+          <Text style={styles.googleText}>Google sign-up is temporarily unavailable</Text>
+        </View>
+        <Text style={styles.googleUnavailableHint}>Please create your account with your email and password.</Text>
 
         {/* Sign up button */}
         <TouchableOpacity
@@ -462,6 +453,17 @@ const styles = StyleSheet.create({
     fontSize: 16 * S,
     fontWeight: '500',
     color: '#F8F3ED',
+  },
+  googleUnavailable: {
+    opacity: 0.72,
+    marginBottom: 7 * S,
+  },
+  googleUnavailableHint: {
+    color: '#C9D4E3',
+    textAlign: 'center',
+    fontSize: 12 * S,
+    lineHeight: 17 * S,
+    marginBottom: 14 * S,
   },
 
   // SUBMIT
