@@ -24,6 +24,50 @@ export function PortalInstallBanner() {
     return () => { window.removeEventListener('beforeinstallprompt', onBeforeInstall); window.removeEventListener('appinstalled', onInstalled); };
   }, []);
 
+  // The browser keeps a push subscription after a reload. Restore that state
+  // instead of asking an already-enabled device to enable alerts again.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    let active = true;
+    const restoreAlertState = async () => {
+      if (!vapidPublicKey || !window.isSecureContext || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+        if (active) setAlertStatus('unavailable');
+        return;
+      }
+      if (Notification.permission === 'denied') {
+        if (active) setAlertStatus('blocked');
+        return;
+      }
+      // "default" means the device has not chosen yet. Never prompt on page load.
+      if (Notification.permission !== 'granted') return;
+      try {
+        const registration = await navigator.serviceWorker.register('/aom-sw.js', { scope: '/' });
+        const subscription = await registration.pushManager.getSubscription();
+        const { data: auth } = await supabase.auth.getUser();
+        if (!subscription || !auth.user) return;
+        const payload = subscription.toJSON();
+        if (!payload.endpoint || !payload.keys?.p256dh || !payload.keys.auth) return;
+        const { error } = await supabase.from('web_push_subscriptions').upsert({
+          user_id: auth.user.id,
+          endpoint: payload.endpoint,
+          p256dh: payload.keys.p256dh,
+          auth: payload.keys.auth,
+          user_agent: navigator.userAgent,
+          enabled: true,
+          last_error: null,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'endpoint' });
+        if (error) throw error;
+        if (active) setAlertStatus('enabled');
+      } catch (error) {
+        console.warn('Unable to restore portal alerts', error);
+        if (active) setAlertStatus('error');
+      }
+    };
+    void restoreAlertState();
+    return () => { active = false; };
+  }, [vapidPublicKey]);
+
   if (Platform.OS !== 'web') return null;
   const install = async () => {
     if (!installPrompt) return;
