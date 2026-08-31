@@ -27,7 +27,7 @@ const CATEGORIES = [
 // Curated manually for launch. Replace this list with an order-volume query when
 // AOM is ready to rank genuine best sellers in real time.
 const BEST_SELLER_IDS = ['fdb4365a-b258-4fe5-9872-fcb826b19c66', '0f3024b0-2e98-4994-b183-5db344eebe55', '98a10b1d-cb8e-41df-a82a-111249374b7a', 'cb00ae17-ea1e-41bb-b19e-711fdb6c060e', 'cbd23360-7b72-45e1-8261-db4a2b494f29'] as const;
-type BestSellerProduct = { id: string; name: string; vendor: string; vendorId: string; price: number; imageUrl?: string | null; category?: string | null; marketplaceCategory?: string | null; icon: Icon };
+type BestSellerProduct = { id: string; name: string; vendor: string; vendorId: string; storeType?: 'marketplace' | 'supermarket' | 'service' | null; price: number; imageUrl?: string | null; category?: string | null; marketplaceCategory?: string | null; icon: Icon };
 const SUPERMARKET: { label: string; image: number; slug: string }[] = [
   { label: 'All products', image: require('../../assets/images/home/all-products.png'), slug: 'all-products' }, { label: 'Baking stuff', image: require('../../assets/images/home/bakingstuff.png'), slug: 'baking-stuff' }, { label: 'Beauty & Hygiene', image: require('../../assets/images/home/skincare.png'), slug: 'beauty-hygiene' }, { label: 'Electronics', image: require('../../assets/images/home/electronics.png'), slug: 'electronics' }, { label: 'Fragrances', image: require('../../assets/images/home/category-fragrances.png'), slug: 'fragrances' }, { label: 'Groceries', image: require('../../assets/images/home/groceries.png'), slug: 'groceries' },
 ];
@@ -60,16 +60,16 @@ function LegacyProductCard({ item, width, quantity, change }: { item: BestSeller
   return <View style={[styles.productCard, { width }]}><View style={styles.productImage}><Ionicons name={item.icon} size={62} color="rgba(0,91,59,0.55)" /></View><View style={styles.productInfo}><Text numberOfLines={1} style={styles.productName}>{item.name}</Text><Text numberOfLines={1} style={styles.productVendor}>{item.vendor}</Text><View style={styles.productFooter}><View style={styles.quantity}><TouchableOpacity onPress={() => change(-1)} style={styles.quantityButton}><Text style={styles.quantitySign}>−</Text></TouchableOpacity><Text style={styles.quantityValue}>{quantity}</Text><TouchableOpacity onPress={() => change(1)} style={styles.quantityButton}><Text style={styles.quantitySign}>+</Text></TouchableOpacity></View><View style={styles.productPurchase}><Text style={styles.price}>{money(item.price)}</Text><TouchableOpacity onPress={() => change(1)} accessibilityLabel={`Add ${item.name} to cart`}><Ionicons name="cart-outline" size={22} color={COLORS.cream} /></TouchableOpacity></View></View></View></View>;
 }
 
-function ProductCard({ item, width, quantity, change, addToCart }: { item: BestSellerProduct; width: number; quantity: number; change: (amount: number) => void; addToCart: () => void }) {
+function ProductCard({ item, width, quantity, change, addToCart, onPress }: { item: BestSellerProduct; width: number; quantity: number; change: (amount: number) => void; addToCart: () => void; onPress: () => void }) {
   return (
     <View style={[styles.productCard, styles.productCardBorderless, { width }]}>
-      <View style={styles.productImage}>{item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.productImageFile} /> : <Ionicons name={item.icon} size={62} color="rgba(0,91,59,0.55)" />}</View>
+      <TouchableOpacity activeOpacity={0.88} onPress={onPress} style={styles.productImage}>{item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.productImageFile} /> : <Ionicons name={item.icon} size={62} color="rgba(0,91,59,0.55)" />}</TouchableOpacity>
       <View style={[styles.productInfo, styles.productInfoPanel]}>
-        <View style={styles.productTitleRow}>
+        <TouchableOpacity activeOpacity={0.78} onPress={onPress} style={styles.productTitleRow}>
           <Text numberOfLines={1} style={[styles.productName, styles.productNameInRow]}>{item.name}</Text>
           <Text style={styles.price}>{money(item.price)}</Text>
-        </View>
-        <Text numberOfLines={1} style={styles.productVendor}>{item.vendor}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity activeOpacity={0.78} onPress={onPress}><Text numberOfLines={1} style={styles.productVendor}>{item.vendor}</Text></TouchableOpacity>
         <View style={styles.productFooter}>
           <View style={styles.quantity}>
             <TouchableOpacity onPress={() => change(-1)} style={styles.quantityButton}><Text style={styles.quantitySign}>−</Text></TouchableOpacity>
@@ -124,12 +124,12 @@ export default function BuyerHome() {
   useEffect(() => {
     let active = true;
     const loadBestSellers = async () => {
-      const { data } = await supabase.from('products').select('id, name, price, image_url, category, marketplace_category, vendor_id, vendors(name)').in('id', [...BEST_SELLER_IDS]).eq('status', 'available');
+      const { data } = await supabase.from('products').select('id, name, price, image_url, category, marketplace_category, vendor_id, vendors(name, store_type)').in('id', [...BEST_SELLER_IDS]).eq('status', 'available');
       if (!active) return;
-      const rows = (data ?? []) as Array<{ id: string; name: string; price: number; image_url?: string | null; category?: string | null; marketplace_category?: string | null; vendor_id: string; vendors?: { name?: string | null } | { name?: string | null }[] | null }>;
+      const rows = (data ?? []) as Array<{ id: string; name: string; price: number; image_url?: string | null; category?: string | null; marketplace_category?: string | null; vendor_id: string; vendors?: { name?: string | null; store_type?: BestSellerProduct['storeType'] } | { name?: string | null; store_type?: BestSellerProduct['storeType'] }[] | null }>;
       const byId = new Map(rows.map((item) => [item.id, item]));
       setBestSellers(BEST_SELLER_IDS.map((id) => byId.get(id)).filter((item): item is (typeof rows)[number] => Boolean(item)).map((item) => ({
-        id: item.id, name: item.name, vendor: Array.isArray(item.vendors) ? item.vendors[0]?.name ?? 'AOM vendor' : item.vendors?.name ?? 'AOM vendor', vendorId: item.vendor_id, price: Number(item.price), imageUrl: item.image_url, category: item.category, marketplaceCategory: item.marketplace_category, icon: 'cube-outline',
+        id: item.id, name: item.name, vendor: Array.isArray(item.vendors) ? item.vendors[0]?.name ?? 'AOM vendor' : item.vendors?.name ?? 'AOM vendor', vendorId: item.vendor_id, storeType: Array.isArray(item.vendors) ? item.vendors[0]?.store_type : item.vendors?.store_type, price: Number(item.price), imageUrl: item.image_url, category: item.category, marketplaceCategory: item.marketplace_category, icon: 'cube-outline',
       })));
     };
     void loadBestSellers();
@@ -186,7 +186,7 @@ export default function BuyerHome() {
     const product = bestSellers.find((item) => item.id === id);
     if (!product) return;
     if (amount > 0) {
-      addItem({ productId: product.id, name: product.name, category: product.vendor, price: product.price });
+      addItem({ productId: product.id, name: product.name, category: product.vendor, price: product.price, imageUrl: product.imageUrl });
       router.push('/(buyer)/cart');
     }
     else changeCartQuantity(id, amount);
@@ -195,8 +195,17 @@ export default function BuyerHome() {
   const addProductToCart = (id: string) => {
     const product = bestSellers.find((item) => item.id === id);
     if (!product) return;
-    addItem({ productId: product.id, name: product.name, category: product.vendor, price: product.price });
+    addItem({ productId: product.id, name: product.name, category: product.vendor, price: product.price, imageUrl: product.imageUrl });
     router.push('/(buyer)/cart');
+  };
+
+  const openBestSeller = (product: BestSellerProduct) => {
+    if (product.storeType === 'supermarket') {
+      const category = (product.category ?? 'all-products').toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'all-products';
+      router.push({ pathname: '/(buyer)/supermarket/[category]/[productId]', params: { category, productId: product.id } });
+      return;
+    }
+    router.push({ pathname: '/(buyer)/marketplace/[vendorId]/[productId]', params: { vendorId: product.vendorId, productId: product.id } });
   };
 
   const openSearchResult = (result: SearchResult) => {
@@ -230,7 +239,7 @@ export default function BuyerHome() {
         <ImageBackground source={homePromo?.background_image_url ? { uri: homePromo.background_image_url } : PROMO_IMAGE} imageStyle={styles.promoImage} style={[styles.promo, { backgroundColor: homePromo?.background_color || COLORS.navy }]}><View style={styles.promoOverlay} /><Text style={styles.promoEyebrow}>{homePromo?.heading || "TODAY'S PICK"}</Text><Text style={styles.promoTitle}>{homePromo?.message || "Sholly's jollof is extra smoky today."}</Text><TouchableOpacity style={styles.orderButton} onPress={openHomePromo}><Text style={styles.orderButtonText}>{homePromo?.cta_label || 'ORDER NOW'}</Text></TouchableOpacity></ImageBackground>
         <SectionTitle title="Vendors open now" />
         <FlatList horizontal data={vendors} showsHorizontalScrollIndicator={false} keyExtractor={(item) => item.id} contentContainerStyle={styles.horizontalList} renderItem={({ item }) => <TouchableOpacity activeOpacity={0.85} style={[styles.vendorCard, { width: vendorCardWidth }]} onPress={() => router.push({ pathname: '/(buyer)/marketplace/[vendorId]', params: { vendorId: item.id } })}><ImageBackground source={item.banner_url ? { uri: item.banner_url } : PROMO_IMAGE} style={styles.vendorImage} imageStyle={styles.vendorImageFile}><View style={styles.open}><Text style={styles.openText}>{item.is_open === false ? 'CLOSED' : 'OPEN'}</Text></View></ImageBackground><View style={styles.vendorInfo}><Text numberOfLines={1} style={styles.vendorName}>{item.name}</Text><Text numberOfLines={1} style={styles.vendorCuisine}>{item.category ?? 'Marketplace'}</Text><Text style={styles.deliveryTime}>{item.average_prep_time ?? '30–60 mins'}</Text></View></TouchableOpacity>} />
-        <SectionTitle title="Best sellers" /><FlatList horizontal data={bestSellers} showsHorizontalScrollIndicator={false} keyExtractor={(item) => item.id} contentContainerStyle={[styles.horizontalList, styles.products]} ListEmptyComponent={<View style={styles.bestSellerLoading}><ActivityIndicator size="small" color={COLORS.mint} /></View>} renderItem={({ item }) => <ProductCard item={item} width={cardWidth} quantity={quantities[item.id] ?? 0} change={(amount) => updateQuantity(item.id, amount)} addToCart={() => addProductToCart(item.id)} />} />
+        <SectionTitle title="Best sellers" /><FlatList horizontal data={bestSellers} showsHorizontalScrollIndicator={false} keyExtractor={(item) => item.id} contentContainerStyle={[styles.horizontalList, styles.products]} ListEmptyComponent={<View style={styles.bestSellerLoading}><ActivityIndicator size="small" color={COLORS.mint} /></View>} renderItem={({ item }) => <ProductCard item={item} width={cardWidth} quantity={quantities[item.id] ?? 0} change={(amount) => updateQuantity(item.id, amount)} addToCart={() => addProductToCart(item.id)} onPress={() => openBestSeller(item)} />} />
       </View>}
     </ScrollView>
     <View style={styles.footer}>{[['home-outline', 'Home'], ['restaurant-outline', 'Cafeteria'], ['sparkles-outline', 'Services'], ['person-outline', 'Profile']].map(([icon, label]) => { const isActive = label === 'Home'; return <TouchableOpacity key={label} style={styles.footerItem} onPress={() => label === 'Cafeteria' ? router.push('/(buyer)/cafeteria') : label === 'Services' ? router.push('/(buyer)/services') : label === 'Profile' ? router.push('/(buyer)/profile') : undefined}><Ionicons name={icon as Icon} size={29} color={isActive ? COLORS.mint : COLORS.cream} /><Text style={[styles.footerText, isActive && styles.footerTextActive]}>{label}</Text></TouchableOpacity>; })}</View>
