@@ -19,11 +19,16 @@ async function sendPortalPush(userId: string | null, title: string, body: string
   const projectUrl = Deno.env.get('SUPABASE_URL');
   if (!userId || !secret || !projectUrl) return;
   try {
-    await fetch(`${projectUrl}/functions/v1/portal-push`, {
+    const response = await fetch(`${projectUrl}/functions/v1/portal-push`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Internal-Secret': secret },
       body: JSON.stringify({ user_ids: [userId], title, body, url: '/vendor-portal', tag }),
     });
+    if (!response.ok) {
+      throw new Error(`Push service returned ${response.status}: ${(await response.text()).slice(0, 240)}`);
+    }
+    const result = await response.json() as { status?: string; reason?: string; sent?: number };
+    if (result.status === 'skipped') console.warn('Vendor push alert skipped', result.reason ?? 'No enabled device subscription.');
   } catch (error) {
     console.warn('Could not send vendor device alert', error);
   }
@@ -82,8 +87,6 @@ Deno.serve(async (request) => {
         .eq('vendor_id', vendor.id)
         .eq('channel', 'email')
         .maybeSingle();
-      if (existing?.status === 'sent') { results.push({ vendor_id: vendor.id, status: 'already_sent' }); continue; }
-
       const vendorItems = items.filter((item) => item.products?.vendor_id === vendor.id);
       const subtotal = vendorItems.reduce((total, item) => total + Number(item.unit_price) * item.quantity, 0);
       const fulfilment = order.delivery_type === 'pickup'
@@ -102,6 +105,8 @@ Deno.serve(async (request) => {
         `${vendorItems.length} item${vendorItems.length === 1 ? '' : 's'} from ${order.order_number} need${vendorItems.length === 1 ? 's' : ''} your attention.`,
         `order-${order.id}-${vendor.id}`,
       );
+
+      if (existing?.status === 'sent') { results.push({ vendor_id: vendor.id, status: 'already_sent' }); continue; }
 
       const saveAlert = async (status: 'sent' | 'failed' | 'skipped', extra: Record<string, unknown> = {}) => {
         await db.from('vendor_order_alerts').upsert({
