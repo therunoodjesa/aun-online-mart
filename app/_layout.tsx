@@ -2,6 +2,7 @@ import { Stack, usePathname } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { PostHogProvider } from 'posthog-react-native';
+import { Analytics } from '@vercel/analytics/react';
 import { posthog } from '../lib/posthog';
 import './global.css';
 
@@ -24,6 +25,7 @@ export default function RootLayout() {
 
   const navigator = (
     <PostHogProvider client={posthog} autocapture={{ captureScreens: false, captureTouches: true }}>
+      {Platform.OS === 'web' ? <Analytics /> : null}
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="onboarding" />
