@@ -19,6 +19,17 @@ const PICKUP_STEPS = [
   ['pending', 'Order received and processing'], ['accepted', 'Vendor has accepted your order'], ['preparing', 'Your order is being prepared'], ['ready', 'Your order is ready for collection'], ['delivered', 'Order collected successfully'],
 ] as const;
 const STATUS_ORDER = ['pending', 'accepted', 'preparing', 'ready', 'out_for_delivery', 'delivered'];
+const STATUS_MESSAGES: Record<string, string> = {
+  pending: 'Order received and processing',
+  accepted: 'Vendor has accepted your order',
+  preparing: 'Your order is being prepared',
+  ready: 'Your order is packed and ready',
+  out_for_delivery: 'Order has been handed to the rider',
+  delivered: 'Order delivered successfully',
+  replacement_requested: 'Your vendor has sent replacement options for your review',
+  replacement_selected: 'Your replacement request has been sent to the vendor',
+  cancelled: 'This order was cancelled. AOM will process your refund manually.',
+};
 export default function OrderDetailsPage() {
   const router = useRouter();
   const { orderId, fulfilment, address } = useLocalSearchParams<{ orderId: string; fulfilment?: string; address?: string }>();
@@ -28,18 +39,26 @@ export default function OrderDetailsPage() {
   const [selectedReplacementIds, setSelectedReplacementIds] = useState<string[]>([]);
   const [responding, setResponding] = useState(false);
   const [loading, setLoading] = useState(orderId !== 'preview');
+  const [loadError, setLoadError] = useState<string | null>(null);
   const isPickup = fulfilment === 'pickup' || order?.delivery_type === 'pickup';
 
   useEffect(() => {
     const loadOrder = async () => {
       if (!orderId || orderId === 'preview') { setLoading(false); return; }
-      setLoading(true);
-      const [{ data: orderData }, { data: updatesData }, { data: rejectionData }] = await Promise.all([
+      const [{ data: orderData, error: orderError }, { data: updatesData, error: updatesError }, { data: rejectionData, error: rejectionError }] = await Promise.all([
         supabase.from('orders').select('order_number, status, delivery_type, created_at').eq('id', orderId).single(),
         supabase.from('order_updates').select('id, message, update_type, created_at').eq('order_id', orderId).order('created_at', { ascending: false }).limit(3),
         supabase.from('order_rejection_requests').select('id, reason, other_reason, alternative_products, selected_product_name, selected_products, replacement_budget, selected_subtotal, refund_amount, status').eq('order_id', orderId).maybeSingle(),
       ]);
-      if (orderData) setOrder(orderData as OrderRecord);
+      if (orderError || !orderData) {
+        setLoadError(orderError?.message === 'JSON object requested, multiple (or no) rows returned'
+          ? 'This order is not available in this account. Please sign in with the account that placed it.'
+          : 'We could not load this order right now. Check your connection and try again.');
+        setLoading(false);
+        return;
+      }
+      setLoadError(updatesError || rejectionError ? 'Some live updates could not be refreshed. Retrying automatically…' : null);
+      setOrder(orderData as OrderRecord);
       setCustomUpdates((updatesData ?? []) as OrderUpdate[]);
       const nextRequest = (rejectionData ?? null) as RejectionRequest | null;
       setRejectionRequest(nextRequest?.status === 'pending_customer' ? { ...nextRequest, status: 'choosing' } : nextRequest);
@@ -49,14 +68,17 @@ export default function OrderDetailsPage() {
     void loadOrder();
     if (!orderId || orderId === 'preview') return;
     const channel = supabase.channel(`order-updates-${orderId}`).on('postgres_changes', { event: '*', schema: 'public', table: 'order_updates', filter: `order_id=eq.${orderId}` }, loadOrder).on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${orderId}` }, loadOrder).on('postgres_changes', { event: '*', schema: 'public', table: 'order_rejection_requests', filter: `order_id=eq.${orderId}` }, loadOrder).subscribe();
-    return () => { void supabase.removeChannel(channel); };
+    const refresh = setInterval(() => { void loadOrder(); }, 15000);
+    return () => { clearInterval(refresh); void supabase.removeChannel(channel); };
   }, [orderId]);
 
   const updates = useMemo<TrackingUpdate[]>(() => {
     const status = order?.status ?? 'pending';
     const flow = isPickup ? PICKUP_STEPS : DELIVERY_STEPS;
     const stage = Math.max(0, STATUS_ORDER.indexOf(status));
-    const generated = flow.filter(([key]) => STATUS_ORDER.indexOf(key) <= stage).map(([key, message], index) => ({ id: `system-${key}`, message, update_type: 'system' as const, created_at: new Date(Date.now() - index * 60000).toISOString() }));
+    const generated = STATUS_ORDER.includes(status)
+      ? flow.filter(([key]) => STATUS_ORDER.indexOf(key) <= stage).map(([key, message], index) => ({ id: `system-${key}`, message, update_type: 'system' as const, created_at: new Date(new Date(order?.created_at ?? Date.now()).getTime() + index).toISOString() }))
+      : [{ id: `system-${status}`, message: STATUS_MESSAGES[status] ?? 'Your order status has been updated.', update_type: 'system' as const, created_at: order?.created_at ?? new Date().toISOString() }];
     const recent: TrackingUpdate[] = [...customUpdates, ...generated].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 3);
     while (recent.length < 3) recent.push({ id: `waiting-${recent.length}`, message: 'Waiting for an update from the vendor.', update_type: 'system', created_at: '', pending: true });
     return recent;
@@ -90,9 +112,12 @@ export default function OrderDetailsPage() {
   };
   if (loading) return <View style={styles.loading}><ActivityIndicator size="large" color="#68ECCB" /></View>;
 
+  if (loadError && !order) return <View style={styles.errorScreen}><StatusBar style="light" /><Ionicons name="cloud-offline-outline" size={34} color="#68ECCB" /><Text style={styles.errorTitle}>Order tracking needs a refresh</Text><Text style={styles.errorCopy}>{loadError}</Text><TouchableOpacity onPress={() => router.replace('/(buyer)/')} style={styles.errorButton}><Text style={styles.errorButtonText}>BACK TO HOME</Text></TouchableOpacity></View>;
+
   return <View style={styles.screen}><StatusBar style="light" /><View style={styles.page}>
     <View style={styles.hero}><Text accessibilityRole="header" style={styles.thankYou}>{finalStatus ? 'Order complete!' : 'Thank you!'}</Text><View style={styles.titleCard}><Text style={styles.title}>Order details & tracking</Text></View></View>
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      {loadError ? <View style={styles.refreshNotice}><Ionicons name="sync-outline" size={16} color="#765815" /><Text style={styles.refreshNoticeText}>{loadError}</Text></View> : null}
       <View style={styles.steps}><View style={styles.step}><Ionicons name="checkmark" size={16} color="#FFFFFF" /></View><View style={styles.stepLine} /><View style={styles.step}><Ionicons name="checkmark" size={16} color="#FFFFFF" /></View><View style={styles.stepLine} /><View style={styles.step}><Ionicons name="checkmark" size={16} color="#FFFFFF" /></View><View style={styles.stepLine} /><View style={styles.step}><Ionicons name="checkmark" size={16} color="#FFFFFF" /></View></View>
       <View style={styles.orderBanner}><Text style={styles.orderLabel}>Order Number</Text><View style={styles.orderNo}><Text style={styles.orderNoText}>{orderNumber}</Text></View></View>
       <View style={styles.meta}><View><Text style={styles.metaLabel}>{isPickup ? 'Pickup time' : 'Delivery time'}</Text><Text style={styles.metaLabel}>{isPickup ? 'Pickup location' : 'Dropoff location'}</Text></View><View style={styles.metaRight}><Text style={styles.metaValue}>{isPickup ? 'Ready in ~15 mins' : 'Estimated shortly'}</Text><Text style={styles.metaValue}>{isPickup ? 'Vendor pickup point' : address || 'American University of Nigeria'}</Text></View></View>
@@ -152,11 +177,18 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#FFFFFF', alignItems: 'center' },
   page: { flex: 1, width: '100%', backgroundColor: '#FFFFFF' },
   loading: { flex: 1, backgroundColor: '#01193D', alignItems: 'center', justifyContent: 'center' },
+  errorScreen: { flex: 1, backgroundColor: '#01193D', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 36 },
+  errorTitle: { marginTop: 17, color: '#FFFFFF', fontSize: 22, fontWeight: '800', textAlign: 'center' },
+  errorCopy: { marginTop: 9, color: '#C7D2E1', fontSize: 15, lineHeight: 22, textAlign: 'center' },
+  errorButton: { height: 52, marginTop: 28, paddingHorizontal: 26, borderRadius: 9, backgroundColor: '#68ECCB', alignItems: 'center', justifyContent: 'center' },
+  errorButtonText: { color: '#01193D', fontSize: 13, fontWeight: '800' },
   hero: { alignSelf: 'stretch', width: '100%', height: 180, backgroundColor: '#01193D', borderBottomLeftRadius: 30, borderBottomRightRadius: 30, alignItems: 'center', paddingTop: 54, zIndex: 2, overflow: 'visible' },
   thankYou: { color: '#FFFFFF', fontSize: 32, lineHeight: 38, fontWeight: '800' },
   titleCard: { position: 'absolute', width: '86%', left: '7%', bottom: -27, height: 54, borderRadius: 28, backgroundColor: '#F8F3ED', alignItems: 'center', justifyContent: 'center', elevation: 4, shadowColor: '#01193D', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } },
   title: { color: '#003D6D', fontSize: 17, fontWeight: '800' },
   content: { flexGrow: 1, paddingHorizontal: 26, paddingTop: 49, paddingBottom: 28 },
+  refreshNotice: { marginBottom: 11, paddingHorizontal: 11, paddingVertical: 9, borderRadius: 10, backgroundColor: '#FFF1D3', flexDirection: 'row', alignItems: 'center', gap: 7 },
+  refreshNoticeText: { flex: 1, color: '#765815', fontSize: 12, lineHeight: 16, fontWeight: '600' },
   steps: { width: '86%', alignSelf: 'center', flexDirection: 'row', alignItems: 'center' },
   step: { width: 43, height: 43, borderRadius: 22, backgroundColor: '#01193D', alignItems: 'center', justifyContent: 'center' },
   stepLine: { flex: 1, height: 2, backgroundColor: '#01193D', marginHorizontal: 8 },
