@@ -45,22 +45,18 @@ export default function OrderDetailsPage() {
   useEffect(() => {
     const loadOrder = async () => {
       if (!orderId || orderId === 'preview') { setLoading(false); return; }
-      const [{ data: orderData, error: orderError }, { data: updatesData, error: updatesError }, { data: rejectionData, error: rejectionError }] = await Promise.all([
-        supabase.from('orders').select('order_number, status, delivery_type, created_at').eq('id', orderId).single(),
-        supabase.from('order_updates').select('id, message, update_type, created_at').eq('order_id', orderId).order('created_at', { ascending: false }).limit(3),
-        supabase.from('order_rejection_requests').select('id, reason, other_reason, alternative_products, selected_product_name, selected_products, replacement_budget, selected_subtotal, refund_amount, status').eq('order_id', orderId).maybeSingle(),
-      ]);
-      if (orderError || !orderData) {
-        setLoadError(orderError?.message === 'JSON object requested, multiple (or no) rows returned'
+      const { data, error } = await supabase.functions.invoke('buyer-order-tracking', { body: { order_id: orderId } });
+      if (error || data?.error || !data?.order) {
+        setLoadError(data?.error === 'This order is not available in this account.'
           ? 'This order is not available in this account. Please sign in with the account that placed it.'
           : 'We could not load this order right now. Check your connection and try again.');
         setLoading(false);
         return;
       }
-      setLoadError(updatesError || rejectionError ? 'Some live updates could not be refreshed. Retrying automatically…' : null);
-      setOrder(orderData as OrderRecord);
-      setCustomUpdates((updatesData ?? []) as OrderUpdate[]);
-      const nextRequest = (rejectionData ?? null) as RejectionRequest | null;
+      setLoadError(null);
+      setOrder(data.order as OrderRecord);
+      setCustomUpdates((data.updates ?? []) as OrderUpdate[]);
+      const nextRequest = (data.rejection ?? null) as RejectionRequest | null;
       setRejectionRequest(nextRequest?.status === 'pending_customer' ? { ...nextRequest, status: 'choosing' } : nextRequest);
       if (nextRequest?.status === 'pending_customer') setSelectedReplacementIds([]);
       setLoading(false);
