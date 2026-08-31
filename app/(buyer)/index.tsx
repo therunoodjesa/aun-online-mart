@@ -24,12 +24,10 @@ const CATEGORIES = [
   { label: 'Dairy', image: require('../../assets/images/home/dairy.png') },
   { label: 'Drinks', image: require('../../assets/images/home/Sprite.png') },
 ];
-const PRODUCTS: { id: string; name: string; vendor: string; price: number; icon: Icon }[] = [
-  { id: 'shawarma', name: 'Chicken shawarma', vendor: 'Btee treats & farms', price: 4500, icon: 'fast-food-outline' },
-  { id: 'lotus', name: 'Lotus & Oreo', vendor: 'Cravins Ice-cream', price: 1300, icon: 'ice-cream-outline' },
-  { id: 'jollof', name: 'Jollof rice', vendor: "Sholly's Restaurant", price: 2100, icon: 'restaurant-outline' },
-  { id: 'alfredo', name: 'Chicken Alfredo', vendor: 'Uptown Restaurant', price: 9700, icon: 'pizza-outline' },
-];
+// Curated manually for launch. Replace this list with an order-volume query when
+// AOM is ready to rank genuine best sellers in real time.
+const BEST_SELLER_IDS = ['fdb4365a-b258-4fe5-9872-fcb826b19c66', '0f3024b0-2e98-4994-b183-5db344eebe55', '98a10b1d-cb8e-41df-a82a-111249374b7a', 'cb00ae17-ea1e-41bb-b19e-711fdb6c060e', 'cbd23360-7b72-45e1-8261-db4a2b494f29'] as const;
+type BestSellerProduct = { id: string; name: string; vendor: string; vendorId: string; price: number; imageUrl?: string | null; category?: string | null; marketplaceCategory?: string | null; icon: Icon };
 const SUPERMARKET: { label: string; image: number; slug: string }[] = [
   { label: 'All products', image: require('../../assets/images/home/all-products.png'), slug: 'all-products' }, { label: 'Baking stuff', image: require('../../assets/images/home/bakingstuff.png'), slug: 'baking-stuff' }, { label: 'Beauty & Hygiene', image: require('../../assets/images/home/skincare.png'), slug: 'beauty-hygiene' }, { label: 'Electronics', image: require('../../assets/images/home/electronics.png'), slug: 'electronics' }, { label: 'Fragrances', image: require('../../assets/images/home/category-fragrances.png'), slug: 'fragrances' }, { label: 'Groceries', image: require('../../assets/images/home/groceries.png'), slug: 'groceries' },
 ];
@@ -58,14 +56,14 @@ function SupermarketStores({ vendors, width, onPress }: { vendors: HomeVendor[];
   return <View style={styles.supermarketStores}><SectionTitle title="Supermarket stores" /><FlatList horizontal data={vendors} showsHorizontalScrollIndicator={false} keyExtractor={(item) => item.id} contentContainerStyle={styles.horizontalList} renderItem={({ item }) => { const content = <><View style={styles.supermarketVendorShade} /><View style={[styles.supermarketOpen, item.is_open === false && styles.supermarketClosed]}><View style={styles.supermarketOpenDot} /><Text style={styles.supermarketOpenText}>{item.is_open === false ? 'CLOSED' : 'OPEN'}</Text></View><View style={styles.supermarketVendorCopy}><Text numberOfLines={1} style={styles.supermarketVendorName}>{item.name}</Text><Text numberOfLines={1} style={styles.supermarketVendorMeta}>{item.category || 'Supermarket'}</Text></View></>; return <TouchableOpacity activeOpacity={0.88} style={[styles.supermarketVendorCard, { width }]} onPress={() => onPress(item.id)}>{item.banner_url ? <ImageBackground source={{ uri: item.banner_url }} style={styles.supermarketVendorImage} imageStyle={styles.supermarketVendorImageFile}>{content}</ImageBackground> : <View style={[styles.supermarketVendorImage, styles.supermarketVendorEmpty]}><Ionicons name="storefront-outline" size={34} color={COLORS.mint} />{content}</View>}</TouchableOpacity>; }} /> </View>;
 }
 
-function LegacyProductCard({ item, width, quantity, change }: { item: typeof PRODUCTS[number]; width: number; quantity: number; change: (amount: number) => void }) {
+function LegacyProductCard({ item, width, quantity, change }: { item: BestSellerProduct; width: number; quantity: number; change: (amount: number) => void }) {
   return <View style={[styles.productCard, { width }]}><View style={styles.productImage}><Ionicons name={item.icon} size={62} color="rgba(0,91,59,0.55)" /></View><View style={styles.productInfo}><Text numberOfLines={1} style={styles.productName}>{item.name}</Text><Text numberOfLines={1} style={styles.productVendor}>{item.vendor}</Text><View style={styles.productFooter}><View style={styles.quantity}><TouchableOpacity onPress={() => change(-1)} style={styles.quantityButton}><Text style={styles.quantitySign}>−</Text></TouchableOpacity><Text style={styles.quantityValue}>{quantity}</Text><TouchableOpacity onPress={() => change(1)} style={styles.quantityButton}><Text style={styles.quantitySign}>+</Text></TouchableOpacity></View><View style={styles.productPurchase}><Text style={styles.price}>{money(item.price)}</Text><TouchableOpacity onPress={() => change(1)} accessibilityLabel={`Add ${item.name} to cart`}><Ionicons name="cart-outline" size={22} color={COLORS.cream} /></TouchableOpacity></View></View></View></View>;
 }
 
-function ProductCard({ item, width, quantity, change, addToCart }: { item: typeof PRODUCTS[number]; width: number; quantity: number; change: (amount: number) => void; addToCart: () => void }) {
+function ProductCard({ item, width, quantity, change, addToCart }: { item: BestSellerProduct; width: number; quantity: number; change: (amount: number) => void; addToCart: () => void }) {
   return (
     <View style={[styles.productCard, styles.productCardBorderless, { width }]}>
-      <View style={styles.productImage}><Ionicons name={item.icon} size={62} color="rgba(0,91,59,0.55)" /></View>
+      <View style={styles.productImage}>{item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.productImageFile} /> : <Ionicons name={item.icon} size={62} color="rgba(0,91,59,0.55)" />}</View>
       <View style={[styles.productInfo, styles.productInfoPanel]}>
         <View style={styles.productTitleRow}>
           <Text numberOfLines={1} style={[styles.productName, styles.productNameInRow]}>{item.name}</Text>
@@ -97,6 +95,7 @@ export default function BuyerHome() {
   const [vendors, setVendors] = useState<HomeVendor[]>([]);
   const [homePromo, setHomePromo] = useState<HomePromo | null>(null);
   const [supermarketVendors, setSupermarketVendors] = useState<HomeVendor[]>([]);
+  const [bestSellers, setBestSellers] = useState<BestSellerProduct[]>([]);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -120,6 +119,21 @@ export default function BuyerHome() {
     updateGreeting();
     const timer = setInterval(updateGreeting, 60_000);
     return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const loadBestSellers = async () => {
+      const { data } = await supabase.from('products').select('id, name, price, image_url, category, marketplace_category, vendor_id, vendors(name)').in('id', [...BEST_SELLER_IDS]).eq('status', 'available');
+      if (!active) return;
+      const rows = (data ?? []) as Array<{ id: string; name: string; price: number; image_url?: string | null; category?: string | null; marketplace_category?: string | null; vendor_id: string; vendors?: { name?: string | null } | { name?: string | null }[] | null }>;
+      const byId = new Map(rows.map((item) => [item.id, item]));
+      setBestSellers(BEST_SELLER_IDS.map((id) => byId.get(id)).filter((item): item is (typeof rows)[number] => Boolean(item)).map((item) => ({
+        id: item.id, name: item.name, vendor: Array.isArray(item.vendors) ? item.vendors[0]?.name ?? 'AOM vendor' : item.vendors?.name ?? 'AOM vendor', vendorId: item.vendor_id, price: Number(item.price), imageUrl: item.image_url, category: item.category, marketplaceCategory: item.marketplace_category, icon: 'cube-outline',
+      })));
+    };
+    void loadBestSellers();
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -169,7 +183,7 @@ export default function BuyerHome() {
 
   const updateQuantity = (id: string, amount: number) => {
     setQuantities((current) => ({ ...current, [id]: Math.max(0, (current[id] ?? 0) + amount) }));
-    const product = PRODUCTS.find((item) => item.id === id);
+    const product = bestSellers.find((item) => item.id === id);
     if (!product) return;
     if (amount > 0) {
       addItem({ productId: product.id, name: product.name, category: product.vendor, price: product.price });
@@ -179,7 +193,7 @@ export default function BuyerHome() {
   };
 
   const addProductToCart = (id: string) => {
-    const product = PRODUCTS.find((item) => item.id === id);
+    const product = bestSellers.find((item) => item.id === id);
     if (!product) return;
     addItem({ productId: product.id, name: product.name, category: product.vendor, price: product.price });
     router.push('/(buyer)/cart');
@@ -216,7 +230,7 @@ export default function BuyerHome() {
         <ImageBackground source={homePromo?.background_image_url ? { uri: homePromo.background_image_url } : PROMO_IMAGE} imageStyle={styles.promoImage} style={[styles.promo, { backgroundColor: homePromo?.background_color || COLORS.navy }]}><View style={styles.promoOverlay} /><Text style={styles.promoEyebrow}>{homePromo?.heading || "TODAY'S PICK"}</Text><Text style={styles.promoTitle}>{homePromo?.message || "Sholly's jollof is extra smoky today."}</Text><TouchableOpacity style={styles.orderButton} onPress={openHomePromo}><Text style={styles.orderButtonText}>{homePromo?.cta_label || 'ORDER NOW'}</Text></TouchableOpacity></ImageBackground>
         <SectionTitle title="Vendors open now" />
         <FlatList horizontal data={vendors} showsHorizontalScrollIndicator={false} keyExtractor={(item) => item.id} contentContainerStyle={styles.horizontalList} renderItem={({ item }) => <TouchableOpacity activeOpacity={0.85} style={[styles.vendorCard, { width: vendorCardWidth }]} onPress={() => router.push({ pathname: '/(buyer)/marketplace/[vendorId]', params: { vendorId: item.id } })}><ImageBackground source={item.banner_url ? { uri: item.banner_url } : PROMO_IMAGE} style={styles.vendorImage} imageStyle={styles.vendorImageFile}><View style={styles.open}><Text style={styles.openText}>{item.is_open === false ? 'CLOSED' : 'OPEN'}</Text></View></ImageBackground><View style={styles.vendorInfo}><Text numberOfLines={1} style={styles.vendorName}>{item.name}</Text><Text numberOfLines={1} style={styles.vendorCuisine}>{item.category ?? 'Marketplace'}</Text><Text style={styles.deliveryTime}>{item.average_prep_time ?? '30–60 mins'}</Text></View></TouchableOpacity>} />
-        <SectionTitle title="Best sellers" /><FlatList horizontal data={PRODUCTS} showsHorizontalScrollIndicator={false} keyExtractor={(item) => item.id} contentContainerStyle={[styles.horizontalList, styles.products]} renderItem={({ item }) => <ProductCard item={item} width={cardWidth} quantity={quantities[item.id] ?? 0} change={(amount) => updateQuantity(item.id, amount)} addToCart={() => addProductToCart(item.id)} />} />
+        <SectionTitle title="Best sellers" /><FlatList horizontal data={bestSellers} showsHorizontalScrollIndicator={false} keyExtractor={(item) => item.id} contentContainerStyle={[styles.horizontalList, styles.products]} ListEmptyComponent={<View style={styles.bestSellerLoading}><ActivityIndicator size="small" color={COLORS.mint} /></View>} renderItem={({ item }) => <ProductCard item={item} width={cardWidth} quantity={quantities[item.id] ?? 0} change={(amount) => updateQuantity(item.id, amount)} addToCart={() => addProductToCart(item.id)} />} />
       </View>}
     </ScrollView>
     <View style={styles.footer}>{[['home-outline', 'Home'], ['restaurant-outline', 'Cafeteria'], ['sparkles-outline', 'Services'], ['person-outline', 'Profile']].map(([icon, label]) => { const isActive = label === 'Home'; return <TouchableOpacity key={label} style={styles.footerItem} onPress={() => label === 'Cafeteria' ? router.push('/(buyer)/cafeteria') : label === 'Services' ? router.push('/(buyer)/services') : label === 'Profile' ? router.push('/(buyer)/profile') : undefined}><Ionicons name={icon as Icon} size={29} color={isActive ? COLORS.mint : COLORS.cream} /><Text style={[styles.footerText, isActive && styles.footerTextActive]}>{label}</Text></TouchableOpacity>; })}</View>
@@ -239,7 +253,7 @@ const styles = StyleSheet.create({
   categoryImage: { width: '100%', height: '100%', resizeMode: 'cover' },
   promo: { height: 145, marginHorizontal: 20, marginTop: 22, padding: 14, overflow: 'hidden', borderRadius: 15 }, promoImage: { borderRadius: 15 }, promoOverlay: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(1,25,61,0.77)' }, promoEyebrow: { color: COLORS.mint, fontSize: 17, marginBottom: 3 }, promoTitle: { color: COLORS.cream, fontSize: 17, lineHeight: 21, fontWeight: '600', width: 250 }, orderButton: { marginTop: 8, width: 145, height: 38, borderRadius: 8, backgroundColor: COLORS.cream, alignItems: 'center', justifyContent: 'center' }, orderButtonText: { color: COLORS.navy, fontSize: 16, fontWeight: '600' },
   sectionTitleRow: { flexDirection: 'row', justifyContent: 'space-between', marginHorizontal: 20, marginTop: 20, marginBottom: 8 }, sectionTitle: { color: COLORS.navy, fontSize: 20, fontWeight: '500' }, seeAll: { color: COLORS.green, fontSize: 18, fontWeight: '500' }, horizontalList: { paddingLeft: 20, paddingRight: 12, gap: 8 }, vendorCard: { height: 220, overflow: 'hidden', borderRadius: 20, backgroundColor: COLORS.navy }, vendorImage: { height: 125, justifyContent: 'flex-start' }, vendorImageFile: { borderTopLeftRadius: 20, borderTopRightRadius: 20 }, open: { width: 70, height: 30, marginTop: 15, marginLeft: 13, borderRadius: 4, backgroundColor: '#1D9E75', alignItems: 'center', justifyContent: 'center' }, openText: { color: COLORS.cream, fontSize: 12, fontWeight: '600' }, vendorInfo: { flex: 1, padding: 13 }, vendorName: { color: COLORS.cream, fontSize: 14, fontWeight: '600' }, vendorCuisine: { color: COLORS.muted, fontSize: 12, marginTop: 3 }, deliveryTime: { marginTop: 'auto', color: COLORS.cream, fontSize: 12, fontWeight: '600' },
-  products: { paddingBottom: 6 }, productCard: { height: 220, overflow: 'hidden', borderRadius: 20, backgroundColor: COLORS.navy }, productImage: { height: 135, backgroundColor: COLORS.cream, alignItems: 'center', justifyContent: 'center' }, productInfo: { flex: 1, paddingHorizontal: 13, paddingTop: 7 }, productName: { color: COLORS.cream, fontSize: 13, fontWeight: '700' }, productVendor: { color: COLORS.muted, fontSize: 11, marginTop: 2 }, productFooter: { marginTop: 'auto', marginBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, quantity: { width: 65, height: 25, borderRadius: 13, borderWidth: 1, borderColor: COLORS.muted, backgroundColor: COLORS.white, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around' }, quantityButton: { width: 18, height: 18, borderRadius: 9, borderWidth: 0.5, borderColor: COLORS.muted, alignItems: 'center', justifyContent: 'center' }, quantitySign: { color: COLORS.muted, fontSize: 13, fontWeight: '700' }, quantityValue: { color: COLORS.navy, fontSize: 11, fontWeight: '700' }, productPurchase: { flexDirection: 'row', alignItems: 'center', gap: 7 }, price: { color: COLORS.cream, fontSize: 12, fontWeight: '700' },
+  products: { paddingBottom: 6 }, bestSellerLoading: { width: 170, height: 220, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.navy }, productCard: { height: 220, overflow: 'hidden', borderRadius: 20, backgroundColor: COLORS.navy }, productImage: { height: 135, backgroundColor: COLORS.cream, alignItems: 'center', justifyContent: 'center' }, productImageFile: { width: '100%', height: '100%', resizeMode: 'cover' }, productInfo: { flex: 1, paddingHorizontal: 13, paddingTop: 7 }, productName: { color: COLORS.cream, fontSize: 13, fontWeight: '700' }, productVendor: { color: COLORS.muted, fontSize: 11, marginTop: 2 }, productFooter: { marginTop: 'auto', marginBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, quantity: { width: 65, height: 25, borderRadius: 13, borderWidth: 1, borderColor: COLORS.muted, backgroundColor: COLORS.white, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around' }, quantityButton: { width: 18, height: 18, borderRadius: 9, borderWidth: 0.5, borderColor: COLORS.muted, alignItems: 'center', justifyContent: 'center' }, quantitySign: { color: COLORS.muted, fontSize: 13, fontWeight: '700' }, quantityValue: { color: COLORS.navy, fontSize: 11, fontWeight: '700' }, productPurchase: { flexDirection: 'row', alignItems: 'center', gap: 7 }, price: { color: COLORS.cream, fontSize: 12, fontWeight: '700' },
   productTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 }, productNameInRow: { flex: 1 }, productCardBorderless: { backgroundColor: COLORS.white }, productInfoPanel: { backgroundColor: COLORS.navy, borderBottomLeftRadius: 20, borderBottomRightRadius: 20 },
   supermarketGrid: { padding: 12, paddingTop: 22, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }, supermarketTileWrap: { width: '48.5%', marginBottom: 10 }, supermarketTile: { width: '100%', height: 220, overflow: 'hidden', borderRadius: 20, justifyContent: 'flex-end', padding: 17 }, tileImage: { width: '100%', height: '100%', borderRadius: 20, resizeMode: 'cover' }, tileShade: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(1,25,61,0.25)' }, tileLabel: { color: COLORS.white, fontSize: 20, fontWeight: '700', textAlign: 'left', textShadowColor: 'rgba(1,25,61,0.8)', textShadowRadius: 4, textShadowOffset: { width: 0, height: 1 } },
   supermarketStores: { paddingBottom: 6 }, supermarketVendorCard: { height: 156, overflow: 'hidden', borderRadius: 18, backgroundColor: COLORS.navy }, supermarketVendorImage: { flex: 1, justifyContent: 'flex-end' }, supermarketVendorEmpty: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#12315D' }, supermarketVendorImageFile: { borderRadius: 18, resizeMode: 'cover' }, supermarketVendorShade: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(1,25,61,0.48)' }, supermarketOpen: { position: 'absolute', top: 10, left: 10, minHeight: 24, borderRadius: 12, paddingHorizontal: 9, backgroundColor: '#1D9E75', flexDirection: 'row', alignItems: 'center', gap: 5 }, supermarketClosed: { backgroundColor: '#657080' }, supermarketOpenDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.cream }, supermarketOpenText: { color: COLORS.cream, fontSize: 10, fontWeight: '800' }, supermarketVendorCopy: { padding: 13 }, supermarketVendorName: { color: COLORS.cream, fontSize: 16, fontWeight: '800' }, supermarketVendorMeta: { color: '#D8E3EF', fontSize: 12, marginTop: 3 },
