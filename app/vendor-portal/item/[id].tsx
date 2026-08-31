@@ -111,38 +111,18 @@ export default function CatalogueItemEditor() {
   const save = async () => {
     if (!name.trim() || !price || Number.isNaN(Number(price)) || Number(price) < 0) { Alert.alert('Check the details', 'Add a product name and a valid price.'); return; }
     setSaving(true);
-    const { data: auth, error: authError } = await supabase.auth.getUser();
-    if (authError || !auth.user) { setSaving(false); Alert.alert('Sign in again', friendlyError(authError, 'Your session has expired. Sign in again, return to Inventory, and retry.')); return; }
-    const { data: vendor, error: vendorError } = await supabase.from('vendors').select('id').eq('owner_id', auth.user.id).maybeSingle();
-    if (vendorError || !vendor) { setSaving(false); Alert.alert('Store account not linked', friendlyError(vendorError, 'This login is not linked to a vendor store. Sign out and back in. If this remains, ask AOM to link the store to this exact account.')); return; }
     const parsedStock = stockQuantity.trim() === '' ? null : Math.max(0, Math.floor(Number(stockQuantity)));
     if (stockQuantity.trim() !== '' && !Number.isFinite(parsedStock)) { setSaving(false); Alert.alert('Check the stock quantity', 'Enter a whole number that is zero or higher.'); return; }
     if (isNew && parsedStock === null) { setSaving(false); Alert.alert('Add the stock quantity', 'Enter how many units are available before adding this item to your catalogue.'); return; }
-    let nextSortOrder: number | undefined;
-    if (isNew) {
-      const { data: existingProducts } = await supabase.from('products').select('sort_order').eq('vendor_id', vendor.id);
-      nextSortOrder = Math.max(0, ...(existingProducts ?? []).map((product) => Number(product.sort_order ?? 0))) + 1;
-    }
-    const payload = { name: name.trim(), description: description.trim() || null, price: Number(price), stock_quantity: parsedStock, category: category.trim() || null, marketplace_category: marketplaceCategory || null, marketplace_subcategory: subcategory.trim() || null, image_url: imageUrl.trim() || null, status: available ? (parsedStock === 0 ? 'sold_out' : 'available') : 'hidden', ...(isNew ? { sort_order: nextSortOrder } : {}) };
-    const result = isNew ? await supabase.from('products').insert({ ...payload, vendor_id: vendor.id }).select('id').single() : await supabase.from('products').update(payload).eq('id', id).select('id').single();
-    if (result.error || !result.data) { setSaving(false); Alert.alert('Item not saved', friendlyError(result.error, 'Review the item name, price, stock, and category, then try again.')); return; }
-    const productId = result.data.id;
-    const placementDelete = await supabase.from('product_category_placements').delete().eq('product_id', productId);
-    if (placementDelete.error) { setSaving(false); Alert.alert('Categories not saved', friendlyError(placementDelete.error, 'The item was saved, but its extra category placement was not. Return to the item and choose the categories again.')); return; }
-    const validPlacements = extraPlacements.filter((placement) => placement.category.trim()).slice(0, 2);
-    if (validPlacements.length) {
-      const placementInsert = await supabase.from('product_category_placements').insert(validPlacements.map((placement) => ({ product_id: productId, section: placement.section, category: placement.category })));
-      if (placementInsert.error) { setSaving(false); Alert.alert('Categories not saved', friendlyError(placementInsert.error, 'The item was saved, but its extra category placement was not. Return to the item and choose the categories again.')); return; }
-    }
-    const validOptions = options.filter((option) => option.name.trim() && option.option_group.trim());
-    const existingIds = validOptions.map((option) => option.id).filter(Boolean) as string[];
-    if (!isNew) { const { data: existing } = await supabase.from('product_options').select('id').eq('product_id', productId); const removed = (existing ?? []).map((option) => option.id).filter((optionId) => !existingIds.includes(optionId)); if (removed.length) await supabase.from('product_options').delete().in('id', removed); }
-    for (const option of validOptions) {
-      const optionPayload = { product_id: productId, option_group: option.option_group.trim(), name: option.name.trim(), price_modifier: Number(option.price_modifier) || 0, is_available: option.is_available, selection_mode: option.selection_mode ?? 'multiple' };
-      if (option.id) await supabase.from('product_options').update(optionPayload).eq('id', option.id); else await supabase.from('product_options').insert(optionPayload);
-    }
+    const { data, error } = await supabase.functions.invoke('vendor-catalogue-save', { body: {
+      kind: 'product', id: isNew ? null : id,
+      product: { name: name.trim(), description: description.trim() || null, price: Number(price), stock_quantity: parsedStock, category: category.trim() || null, marketplace_category: marketplaceCategory || null, marketplace_subcategory: subcategory.trim() || null, image_url: imageUrl.trim() || null, status: available ? (parsedStock === 0 ? 'sold_out' : 'available') : 'hidden' },
+      placements: extraPlacements.filter((placement) => placement.category.trim()).slice(0, 2),
+      options: options.filter((option) => option.name.trim() && option.option_group.trim()).map((option) => ({ option_group: option.option_group.trim(), name: option.name.trim(), price_modifier: Number(option.price_modifier) || 0, is_available: option.is_available, selection_mode: option.selection_mode ?? 'multiple' })),
+    } });
+    if (error || data?.error) { setSaving(false); Alert.alert('Item not saved', friendlyError(error ?? new Error(data?.error), data?.error || 'Review the item details and try again.')); return; }
     setSaving(false);
-    Alert.alert('Saved', `${name.trim()} is now in your catalogue.`);
+    Alert.alert('Saved', data?.message || `${name.trim()} is now in your catalogue.`);
     router.replace('/vendor-portal');
   };
   const deleteItem = () => {
