@@ -139,19 +139,20 @@ export default function VendorPortal() {
     const { error } = await supabase.from('products').update({ stock_quantity, status }).eq('id', product.id);
     if (error) { void load(); Alert.alert('Stock not updated', friendlyError(error, 'Refresh the inventory, enter a whole number, and retry.')); }
   };
-  const moveProduct = async (product: Product, direction: -1 | 1) => {
+  const moveProduct = async (product: Product, offset: number) => {
     const ordered = [...products].sort((a, b) => Number(a.sort_order ?? Number.MAX_SAFE_INTEGER) - Number(b.sort_order ?? Number.MAX_SAFE_INTEGER));
-    const index = ordered.findIndex((item) => item.id === product.id);
-    const neighbour = ordered[index + direction];
-    if (index < 0 || !neighbour) return;
-    const productOrder = product.sort_order ?? index + 1;
-    const neighbourOrder = neighbour.sort_order ?? index + direction + 1;
-    setProducts((items) => items.map((item) => item.id === product.id ? { ...item, sort_order: neighbourOrder } : item.id === neighbour.id ? { ...item, sort_order: productOrder } : item));
-    const [{ error: firstError }, { error: secondError }] = await Promise.all([
-      supabase.from('products').update({ sort_order: neighbourOrder }).eq('id', product.id),
-      supabase.from('products').update({ sort_order: productOrder }).eq('id', neighbour.id),
-    ]);
-    if (firstError || secondError) { void load(); Alert.alert('Placement not changed', friendlyError(firstError ?? secondError, 'Refresh the inventory and move the item again.')); }
+    const from = ordered.findIndex((item) => item.id === product.id);
+    if (from < 0) return;
+    const to = Math.max(0, Math.min(ordered.length - 1, from + offset));
+    if (from === to) return;
+    const next = [...ordered];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    const placed = next.map((item, index) => ({ ...item, sort_order: index + 1 }));
+    setProducts((items) => items.map((item) => placed.find((placedItem) => placedItem.id === item.id) ?? item));
+    const results = await Promise.all(placed.filter((item, index) => Number(ordered[index]?.sort_order ?? index + 1) !== item.sort_order).map((item) => supabase.from('products').update({ sort_order: item.sort_order }).eq('id', item.id)));
+    const error = results.find((result) => result.error)?.error;
+    if (error) { void load(); Alert.alert('Placement not changed', friendlyError(error, 'Refresh the inventory and drag the item again.')); }
   };
   const saveSchedule = async () => {
     if (!vendor) return;
@@ -209,7 +210,7 @@ function Sidebar({ page, setPage, newOrderCount, compact }: { page: Page; setPag
   if (compact) return <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.mobileNavBar} contentContainerStyle={styles.mobileNavContent}>{items.filter((item) => mobilePages.includes(item.id)).map((item) => <TouchableOpacity key={item.id} style={[styles.mobileNav, page === item.id && styles.mobileNavActive]} onPress={() => setPage(item.id)}><Ionicons name={item.icon} size={18} color={page === item.id ? '#176E73' : '#607080'} /><Text style={[styles.mobileNavText, page === item.id && styles.navTextActive]}>{item.label}</Text>{item.id === 'orders' && newOrderCount > 0 ? <View style={styles.mobileOrdersDot} /> : null}</TouchableOpacity>)}</ScrollView>;
   return <View style={styles.sidebar}><Text style={styles.menu}>MENU</Text>{items.map((item) => <TouchableOpacity key={item.id} style={[styles.nav, page === item.id && styles.navActive]} onPress={() => setPage(item.id)}><Ionicons name={item.icon} size={19} color={page === item.id ? '#176E73' : '#7D7D7D'} /><Text style={[styles.navText, page === item.id && styles.navTextActive]}>{item.label}</Text>{item.id === 'orders' && newOrderCount > 0 ? <View style={styles.ordersDot} /> : null}</TouchableOpacity>)}</View>;
 }
-function Inventory({ compact, vendor, rows, search, setSearch, filter, setFilter, counts, setOpen, setStatus, setStock, setStockValue, moveProduct }: { compact?: boolean; vendor: Vendor; rows: Product[]; search: string; setSearch: (value: string) => void; filter: 'all' | Product['status']; setFilter: (value: 'all' | Product['status']) => void; counts: Record<'all' | Product['status'], number>; setOpen: (value: boolean) => void; setStatus: (item: Product, value: Product['status']) => void; setStock: (item: Product, change: number) => void; setStockValue: (item: Product, value: string) => void; moveProduct: (item: Product, direction: -1 | 1) => void }) {
+function Inventory({ compact, vendor, rows, search, setSearch, filter, setFilter, counts, setOpen, setStatus, setStock, setStockValue, moveProduct }: { compact?: boolean; vendor: Vendor; rows: Product[]; search: string; setSearch: (value: string) => void; filter: 'all' | Product['status']; setFilter: (value: 'all' | Product['status']) => void; counts: Record<'all' | Product['status'], number>; setOpen: (value: boolean) => void; setStatus: (item: Product, value: Product['status']) => void; setStock: (item: Product, change: number) => void; setStockValue: (item: Product, value: string) => void; moveProduct: (item: Product, offset: number) => void }) {
   const tabs: { id: 'all' | Product['status']; label: string }[] = [{ id: 'all', label: 'All items' }, { id: 'available', label: 'Available' }, { id: 'sold_out', label: 'Sold out' }, { id: 'hidden', label: 'Hidden' }];
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
@@ -257,7 +258,7 @@ function Inventory({ compact, vendor, rows, search, setSearch, filter, setFilter
   </>;
 }
 
-function InventoryMobileCard({ item, setStatus, setStock, setStockValue, moveProduct }: { item: Product; setStatus: (item: Product, value: Product['status']) => void; setStock: (item: Product, change: number) => void; setStockValue: (item: Product, value: string) => void; moveProduct: (item: Product, direction: -1 | 1) => void }) {
+function InventoryMobileCard({ item, setStatus, setStock, setStockValue, moveProduct }: { item: Product; setStatus: (item: Product, value: Product['status']) => void; setStock: (item: Product, change: number) => void; setStockValue: (item: Product, value: string) => void; moveProduct: (item: Product, offset: number) => void }) {
   const statusLabel = item.status === 'available' ? 'Available' : item.status === 'sold_out' ? 'Sold out' : 'Hidden';
   return <View style={mobileInventoryStyles.card}>
     <View style={mobileInventoryStyles.top}><PlacementHandle item={item} onMove={moveProduct} /><View style={styles.itemIcon}><Ionicons name="restaurant-outline" size={20} color="#68ECCB" /></View><View style={{ flex: 1 }}><Text style={styles.itemName}>{item.name}</Text><Text style={styles.itemSub}>{item.category ?? 'Menu item'}</Text></View><Text style={mobileInventoryStyles.price}>{'₦' + item.price.toLocaleString('en-NG')}</Text></View>
@@ -285,11 +286,15 @@ function ServiceDateAvailability({ dates, onChange }: { dates: string[]; onChang
 }
 function Head({ title, subtitle, actions, save, onSave, saving }: { title: string; subtitle: string; actions?: boolean; save?: boolean; onSave?: () => void; saving?: boolean }) { const router = useRouter(); return <View style={styles.head}><View><Text style={styles.title}>{title}</Text><Text style={styles.subtitle}>{subtitle}</Text></View>{actions ? <View style={styles.headButtons}><Button icon="download-outline" label="Import" /><Button icon="add" label="Add item" onPress={() => router.push('/vendor-portal/item/new')} /></View> : save ? <Button icon="save-outline" label={saving ? 'Saving…' : 'Save schedule'} onPress={onSave} /> : null}</View>; }
 function StoreNotice({ vendor, setOpen }: { vendor: Vendor; setOpen: (value: boolean) => void }) { return <View style={[styles.notice, !vendor.is_open && styles.noticeClosed]}><Ionicons name="storefront-outline" size={23} color="#176E73" /><View style={{ flex: 1 }}><Text style={styles.noticeTitle}>Store is {vendor.is_open ? 'accepting' : 'not accepting'} orders</Text><Text style={styles.noticeText}>{vendor.is_open ? 'Students can browse and order from your menu right now.' : 'Toggle to reopen instantly.'}</Text></View><Text style={styles.openText}>{vendor.is_open ? 'Open' : 'Closed'}</Text><Switch value={Boolean(vendor.is_open)} onValueChange={setOpen} trackColor={{ false: '#D9C180', true: '#9AE4D1' }} thumbColor="#FFFFFF" /></View>; }
-function PlacementHandle({ item, onMove }: { item: Product; onMove: (item: Product, direction: -1 | 1) => void }) {
+function PlacementHandle({ item, onMove }: { item: Product; onMove: (item: Product, offset: number) => void }) {
   const responder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dy) > 3,
-    onPanResponderRelease: (_, gesture) => { if (Math.abs(gesture.dy) > 20) onMove(item, gesture.dy > 0 ? 1 : -1); },
+    onPanResponderRelease: (_, gesture) => {
+      // One row is roughly 76px on desktop. A longer swipe therefore moves an
+      // item several places, rather than making the vendor repeat one-step moves.
+      if (Math.abs(gesture.dy) > 20) onMove(item, Math.sign(gesture.dy) * Math.max(1, Math.round(Math.abs(gesture.dy) / 76)));
+    },
   }), [item, onMove]);
   return <View {...responder.panHandlers} style={inventoryStyles.placementHandle} accessibilityLabel={`Drag ${item.name} to change its placement`}><View style={inventoryStyles.handleLong} /><View style={inventoryStyles.handleShort} /></View>;
 }
