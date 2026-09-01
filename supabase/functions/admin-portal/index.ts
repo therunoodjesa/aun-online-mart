@@ -3,6 +3,7 @@ import { admin, corsHeaders, getUser, json } from '../_shared/paystack.ts';
 type AdminRequest =
   | { action: 'dashboard' }
   | { action: 'confirm_transfer'; intent_id: string }
+  | { action: 'cancel_transfer'; intent_id: string }
   | { action: 'review_vendor'; application_id: string; decision: 'approved' | 'rejected'; reviewer_note?: string }
   | { action: 'update_payout'; payout_id: string; status: 'processing' | 'paid' | 'rejected'; note?: string }
   | { action: 'assign_dispatch'; order_id: string; rider_name: string; rider_phone: string }
@@ -25,7 +26,7 @@ async function dashboard(db: ReturnType<typeof admin>) {
     db.from('orders').select('*', { count: 'exact', head: true }).eq('payment_status', 'paid'),
     db.from('vendor_payout_requests').select('*', { count: 'exact', head: true }).in('status', ['requested', 'processing']),
     db.from('orders').select('*', { count: 'exact', head: true }).eq('payment_status', 'paid').in('status', ['ready', 'out_for_delivery']),
-    db.from('payment_intents').select('id, reference, amount_kobo, order_id, delivery_address, delivery_instructions, fulfilment, created_at').eq('payment_channel', 'bank_transfer').eq('status', 'pending').order('created_at', { ascending: false }).limit(25),
+    db.from('payment_intents').select('id, reference, amount_kobo, order_id, user_id, delivery_address, delivery_instructions, fulfilment, created_at').eq('payment_channel', 'bank_transfer').eq('status', 'pending').order('created_at', { ascending: false }).limit(25),
     db.from('vendor_applications').select('id, store_name, contact_name, phone, store_type, operating_location, category, address, pickup_location, created_at').eq('status', 'pending').order('created_at', { ascending: false }).limit(25),
     db.from('vendor_payout_requests').select('id, vendor_id, amount, status, requested_at, processed_at, reference, note').in('status', ['requested', 'processing']).order('requested_at', { ascending: true }).limit(50),
     db.from('orders').select('id, order_number, status, delivery_type, delivery_address, delivery_instructions, delivery_slot, rider_name, rider_phone, rider_assigned_at, dispatch_status, created_at').eq('payment_status', 'paid').in('status', ['ready', 'out_for_delivery']).order('created_at', { ascending: true }).limit(50),
@@ -52,6 +53,12 @@ async function dashboard(db: ReturnType<typeof admin>) {
     : { data: [], error: null };
   if (ordersError) throw new Error(ordersError.message);
   const orderById = new Map((orders ?? []).map((order) => [order.id, order]));
+  const transferUserIds = [...new Set((intents ?? []).map((intent) => intent.user_id).filter(Boolean))];
+  const { data: transferProfiles, error: transferProfilesError } = transferUserIds.length
+    ? await db.from('profiles').select('id, full_name, phone').in('id', transferUserIds)
+    : { data: [], error: null };
+  if (transferProfilesError) throw new Error(transferProfilesError.message);
+  const transferProfileByUserId = new Map((transferProfiles ?? []).map((profile) => [profile.id, profile]));
   const vendorIds = [...new Set((payoutRows ?? []).map((payout) => payout.vendor_id))];
   const { data: vendors, error: vendorsError } = vendorIds.length ? await db.from('vendors').select('id, name').in('id', vendorIds) : { data: [], error: null };
   if (vendorsError) throw new Error(vendorsError.message);
@@ -139,7 +146,7 @@ async function dashboard(db: ReturnType<typeof admin>) {
 
   return {
     metrics: { pending_transfers: pendingTransferCount ?? 0, pending_vendor_applications: pendingVendorCount ?? 0, paid_orders: paidOrderCount ?? 0, pending_payouts: pendingPayoutCount ?? 0, dispatch_queue: dispatchCount ?? 0, gross_sales: grossSales, sales_last_30_days: salesLast30Days, average_order_value: (salesOrders ?? []).length ? Math.round(grossSales / (salesOrders ?? []).length) : 0, partner_vendors: vendorCount ?? 0, top_vendors: topVendors },
-    pending_transfers: (intents ?? []).map((intent) => ({ ...intent, delivery_address: [intent.delivery_address, intent.delivery_instructions].filter(Boolean).join(' · ') || null, order: intent.order_id ? orderById.get(intent.order_id) ?? null : null })),
+    pending_transfers: (intents ?? []).map((intent) => ({ ...intent, delivery_address: [intent.delivery_address, intent.delivery_instructions].filter(Boolean).join(' · ') || null, customer: transferProfileByUserId.get(intent.user_id) ?? { full_name: 'Customer', phone: null }, order: intent.order_id ? orderById.get(intent.order_id) ?? null : null })),
     pending_vendor_applications: applications ?? [],
     pending_payouts: (payoutRows ?? []).map((payout) => ({ ...payout, vendor: vendorById.get(payout.vendor_id) ?? null })),
     dispatch_queue: (dispatchRows ?? []).map((order) => ({ ...order, delivery_address: [order.delivery_address, order.delivery_instructions].filter(Boolean).join(' · ') || null })),
@@ -314,6 +321,24 @@ async function confirmTransfer(db: ReturnType<typeof admin>, intentId: string) {
   return { order_id: intent.order_id, already_confirmed: false };
 }
 
+async function cancelTransfer(db: ReturnType<typeof admin>, intentId: string) {
+  const { data: intent, error: intentError } = await db.from('payment_intents').select('id, order_id, status, payment_channel, user_id').eq('id', intentId).maybeSingle();
+  if (intentError || !intent) throw new Error(intentError?.message ?? 'Transfer record not found.');
+  if (intent.payment_channel !== 'bank_transfer') throw new Error('Only a pending bank transfer can be cancelled here.');
+  if (intent.status !== 'pending') throw new Error(`This transfer cannot be cancelled while it is ${intent.status}.`);
+  const { error: paymentError } = await db.from('payment_intents').update({ status: 'failed', updated_at: new Date().toISOString() }).eq('id', intent.id).eq('status', 'pending');
+  if (paymentError) throw new Error(paymentError.message);
+  if (intent.order_id) {
+    const { data: order, error: orderError } = await db.from('orders').update({ status: 'cancelled', payment_status: 'failed' }).eq('id', intent.order_id).select('id, order_number, user_id').maybeSingle();
+    if (orderError) throw new Error(orderError.message);
+    if (order) {
+      await db.from('order_updates').insert({ order_id: order.id, message: 'Your bank transfer was not received, so this order was cancelled. You have not been charged.', update_type: 'system' });
+      if (order.user_id) await db.from('notifications').insert({ user_id: order.user_id, title: 'Transfer not received', body: `Payment for order #${order.order_number} was not received. The order was cancelled and no payment was taken.`, message: 'Your transfer was not received. You can place a new order whenever you are ready.', kind: 'order', action_label: 'VIEW ORDERS', action_href: '/(buyer)/profile' });
+    }
+  }
+  return { status: 'cancelled' };
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (request.method !== 'POST') return json({ error: 'Method not allowed.' }, 405);
@@ -322,6 +347,7 @@ Deno.serve(async (request) => {
     const { db } = await requireAdmin(request);
     if (body.action === 'dashboard') return json(await dashboard(db));
     if (body.action === 'confirm_transfer') return json(await confirmTransfer(db, body.intent_id));
+    if (body.action === 'cancel_transfer') return json(await cancelTransfer(db, body.intent_id));
     if (body.action === 'update_payout') return json(await updatePayout(db, body.payout_id, body.status, body.note));
     if (body.action === 'assign_dispatch') return json(await assignDispatch(db, body.order_id, body.rider_name, body.rider_phone));
     if (body.action === 'update_dispatch') return json(await updateDispatch(db, body.order_id, body.status));
