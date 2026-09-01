@@ -212,9 +212,9 @@ export default function BuyerHome() {
     setSearchQuery('');
     setSearchResults([]);
     if (result.type === 'vendor') router.push({ pathname: '/(buyer)/marketplace/[vendorId]', params: { vendorId: result.id } });
-    else if (result.type === 'cafeteria-product') router.push({ pathname: '/(buyer)/cafeteria', params: { category: result.category ?? 'snacks' } });
+    else if (result.type === 'cafeteria-product') router.push({ pathname: '/(buyer)/cafeteria/[productId]', params: { productId: result.id } });
     else if (result.marketplaceCategory && result.vendorId) router.push({ pathname: '/(buyer)/marketplace/[vendorId]/[productId]', params: { vendorId: result.vendorId, productId: result.id } });
-    else router.push({ pathname: '/(buyer)/supermarket/[category]', params: { category: (result.category ?? 'all-products').toLowerCase().replace(/\s*&\s*/g, '-').replace(/\s+/g, '-') } });
+    else router.push({ pathname: '/(buyer)/supermarket/[category]/[productId]', params: { category: (result.category ?? 'all-products').toLowerCase().replace(/\s*&\s*/g, '-').replace(/\s+/g, '-'), productId: result.id } });
   };
   const openHomePromo = () => {
     const destination = homePromo?.cta_href?.trim();
