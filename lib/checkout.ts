@@ -1,6 +1,6 @@
 import type { CartItem } from '../store/cartstore';
 
-export const CAFETERIA_PACKAGING_PER_MEAL = 200;
+export const CAFETERIA_PACKAGING_PER_ADDITIONAL_MEAL = 200;
 export const CAFETERIA_DELIVERY_FLAT_RATE = 800;
 export const STANDARD_DELIVERY_FEE = 2500;
 export const MEAL_PLAN_ALLOWANCE = 1800;
@@ -18,7 +18,9 @@ export function calculateCheckout(items: CartItem[], deliveryType: 'dispatch' | 
   const mealCount = cafeteriaItems.filter(isMeal).reduce((sum, item) => sum + item.quantity, 0);
   const eligibleSubtotal = cafeteriaItems.filter((item) => item.mealPlanEligible !== false).reduce((sum, item) => sum + item.price * item.quantity, 0);
   const mealPlanCredit = useMealPlan ? Math.min(eligibleSubtotal, Math.max(0, planCount) * MEAL_PLAN_ALLOWANCE) : 0;
-  const packagingFee = mealCount * CAFETERIA_PACKAGING_PER_MEAL;
+  // The ₦800 cafeteria delivery rate covers packaging for the first plate.
+  // Each extra lunch/dinner plate adds ₦200.
+  const packagingFee = Math.max(0, mealCount - 1) * CAFETERIA_PACKAGING_PER_ADDITIONAL_MEAL;
   const cafeteriaDeliveryFee = deliveryType === 'dispatch' && cafeteriaItems.length ? CAFETERIA_DELIVERY_FLAT_RATE : 0;
   const standardDeliveryFee = deliveryType === 'dispatch' && standardItems.length ? STANDARD_DELIVERY_FEE : 0;
   const deliveryFee = cafeteriaDeliveryFee + standardDeliveryFee;

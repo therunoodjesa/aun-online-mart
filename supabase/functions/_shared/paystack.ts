@@ -109,7 +109,7 @@ export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delive
   });
   const cafeteriaById = new Map(cafeteriaProducts.map((product) => [product.id, product]));
   const cafeteriaOptionsById = new Map((cafeteriaOptions ?? []).map((option) => [option.id, option]));
-  const cafeteriaLines: CheckoutLine[] = cafeteriaItems.map((item) => {
+  const cafeteriaLines: (CheckoutLine & { meal_plan_eligible?: boolean; isMeal?: boolean })[] = cafeteriaItems.map((item) => {
     const productId = item.productId.slice('cafeteria:'.length, 'cafeteria:'.length + 36);
     const product = cafeteriaById.get(productId)!;
     const legacyId = item.productId.slice('cafeteria:'.length);
@@ -125,8 +125,17 @@ export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delive
     const unitPrice = Number(product.price) + selected.reduce((total, option) => total + option.price_modifier * option.quantity, 0);
     const categories = Array.isArray(product.categories) && product.categories.length ? product.categories : [product.category];
     const isMeal = categories.includes('lunch') || categories.includes('dinner');
-    return { source: 'cafeteria', product_id: null, cafeteria_product_id: product.id, product_name: product.name, unit_price: unitPrice, quantity: Math.floor(item.quantity), selected_options: selected, note: typeof item.note === 'string' && item.note.trim() ? item.note.trim().slice(0, 500) : null, meal_plan_credit: 0, packaging_fee: isMeal ? 200 * Math.floor(item.quantity) : 0, meal_plan_eligible: Boolean(product.meal_plan_eligible) } as CheckoutLine & { meal_plan_eligible: boolean };
+    return { source: 'cafeteria', product_id: null, cafeteria_product_id: product.id, product_name: product.name, unit_price: unitPrice, quantity: Math.floor(item.quantity), selected_options: selected, note: typeof item.note === 'string' && item.note.trim() ? item.note.trim().slice(0, 500) : null, meal_plan_credit: 0, packaging_fee: 0, meal_plan_eligible: Boolean(product.meal_plan_eligible), isMeal };
   });
+  // ₦800 cafeteria delivery already covers packaging for the first plate.
+  // Charge ₦200 for every additional lunch/dinner plate, not every plate.
+  let remainingPackagingFee = Math.max(0, cafeteriaLines.filter((line) => line.isMeal).reduce((total, line) => total + line.quantity, 0) - 1) * 200;
+  for (const line of cafeteriaLines) {
+    if (!line.isMeal || remainingPackagingFee <= 0) continue;
+    const lineFee = Math.min(remainingPackagingFee, line.quantity * 200);
+    line.packaging_fee = lineFee;
+    remainingPackagingFee -= lineFee;
+  }
   let remainingMealPlanCredit = 0;
   if (useMealPlan && userId && cafeteriaLines.length) {
     const { data: account } = await db.from('meal_plan_accounts').select('plan_count, meals_used_today, last_used_on').eq('user_id', userId).maybeSingle();
@@ -136,12 +145,15 @@ export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delive
       remainingMealPlanCredit = Math.max(0, Number(account.plan_count ?? 0) - usedToday) * 1800;
     }
   }
-  for (const line of cafeteriaLines as (CheckoutLine & { meal_plan_eligible?: boolean })[]) {
+  for (const line of cafeteriaLines) {
     if (!line.meal_plan_eligible || remainingMealPlanCredit <= 0) continue;
     const credit = Math.min(line.unit_price * line.quantity, remainingMealPlanCredit);
     line.meal_plan_credit = credit;
     remainingMealPlanCredit -= credit;
+  }
+  for (const line of cafeteriaLines) {
     delete line.meal_plan_eligible;
+    delete line.isMeal;
   }
   const lines = [...regularLines, ...cafeteriaLines];
   const subtotal = lines.reduce((total, line) => total + line.unit_price * line.quantity, 0);
