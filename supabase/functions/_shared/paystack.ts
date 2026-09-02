@@ -52,6 +52,25 @@ function legacyOptionSelections(productId: string): RawCheckoutOption[] {
   return bareOption ? [{ id: bareOption, quantity: 1 }] : [];
 }
 
+function cafeteriaHandlingFee(mealPortions: number, snackPortions: number) {
+  // The first three lunch/dinner plates are subsidised by the cafeteria rate:
+  // ₦800, ₦1,000, ₦1,200. Every plate after that adds ₦800.
+  const mealExtra = mealPortions <= 1
+    ? 0
+    : mealPortions <= 3
+      ? (mealPortions - 1) * 200
+      : 400 + (mealPortions - 3) * 800;
+
+  // Snack-only baskets cover up to two portions in the ₦800 flat rate. When
+  // snacks accompany a meal, their surcharge follows the separate meal plan
+  // allowance requested by the cafeteria.
+  const snackExtra = mealPortions > 0
+    ? snackPortions === 0 ? 0 : snackPortions === 1 ? 200 : snackPortions === 2 ? 400 : 1000 + (snackPortions - 3) * 800
+    : snackPortions <= 2 ? 0 : snackPortions <= 4 ? 400 : 400 + (snackPortions - 4) * 800;
+
+  return mealExtra + snackExtra;
+}
+
 export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delivery' | 'pickup' = 'delivery', deliverySlot: string | null = null, userId: string | null = null, useMealPlan = false) {
   const normalised = rawItems.map((item) => ({ ...item, productId: String(item.productId) })).filter((item) => item.quantity > 0 && item.quantity <= 25);
   if (!normalised.length) throw new Error('Your cart is empty.');
@@ -109,7 +128,7 @@ export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delive
   });
   const cafeteriaById = new Map(cafeteriaProducts.map((product) => [product.id, product]));
   const cafeteriaOptionsById = new Map((cafeteriaOptions ?? []).map((option) => [option.id, option]));
-  const cafeteriaLines: (CheckoutLine & { meal_plan_eligible?: boolean; isMeal?: boolean })[] = cafeteriaItems.map((item) => {
+  const cafeteriaLines: (CheckoutLine & { meal_plan_eligible?: boolean; isMeal?: boolean; isSnack?: boolean })[] = cafeteriaItems.map((item) => {
     const productId = item.productId.slice('cafeteria:'.length, 'cafeteria:'.length + 36);
     const product = cafeteriaById.get(productId)!;
     const legacyId = item.productId.slice('cafeteria:'.length);
@@ -125,17 +144,16 @@ export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delive
     const unitPrice = Number(product.price) + selected.reduce((total, option) => total + option.price_modifier * option.quantity, 0);
     const categories = Array.isArray(product.categories) && product.categories.length ? product.categories : [product.category];
     const isMeal = categories.includes('lunch') || categories.includes('dinner');
-    return { source: 'cafeteria', product_id: null, cafeteria_product_id: product.id, product_name: product.name, unit_price: unitPrice, quantity: Math.floor(item.quantity), selected_options: selected, note: typeof item.note === 'string' && item.note.trim() ? item.note.trim().slice(0, 500) : null, meal_plan_credit: 0, packaging_fee: 0, meal_plan_eligible: Boolean(product.meal_plan_eligible), isMeal };
+    const isSnack = categories.includes('snacks') && !isMeal;
+    return { source: 'cafeteria', product_id: null, cafeteria_product_id: product.id, product_name: product.name, unit_price: unitPrice, quantity: Math.floor(item.quantity), selected_options: selected, note: typeof item.note === 'string' && item.note.trim() ? item.note.trim().slice(0, 500) : null, meal_plan_credit: 0, packaging_fee: 0, meal_plan_eligible: Boolean(product.meal_plan_eligible), isMeal, isSnack };
   });
-  // ₦800 cafeteria delivery already covers packaging for the first plate.
-  // Charge ₦200 for every additional lunch/dinner plate, not every plate.
-  let remainingPackagingFee = Math.max(0, cafeteriaLines.filter((line) => line.isMeal).reduce((total, line) => total + line.quantity, 0) - 1) * 200;
-  for (const line of cafeteriaLines) {
-    if (!line.isMeal || remainingPackagingFee <= 0) continue;
-    const lineFee = Math.min(remainingPackagingFee, line.quantity * 200);
-    line.packaging_fee = lineFee;
-    remainingPackagingFee -= lineFee;
-  }
+  const mealPortions = cafeteriaLines.filter((line) => line.isMeal).reduce((total, line) => total + line.quantity, 0);
+  const snackPortions = cafeteriaLines.filter((line) => line.isSnack).reduce((total, line) => total + line.quantity, 0);
+  const extraCafeteriaFee = cafeteriaHandlingFee(mealPortions, snackPortions);
+  // Store the surcharge on one cafeteria line for durable order records. The
+  // column predates these wider handling rules, so it remains the compatible
+  // source for receipts and portal reporting.
+  if (extraCafeteriaFee > 0 && cafeteriaLines[0]) cafeteriaLines[0].packaging_fee = extraCafeteriaFee;
   let remainingMealPlanCredit = 0;
   if (useMealPlan && userId && cafeteriaLines.length) {
     const { data: account } = await db.from('meal_plan_accounts').select('plan_count, meals_used_today, last_used_on').eq('user_id', userId).maybeSingle();
@@ -154,6 +172,7 @@ export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delive
   for (const line of cafeteriaLines) {
     delete line.meal_plan_eligible;
     delete line.isMeal;
+    delete line.isSnack;
   }
   const lines = [...regularLines, ...cafeteriaLines];
   const subtotal = lines.reduce((total, line) => total + line.unit_price * line.quantity, 0);
