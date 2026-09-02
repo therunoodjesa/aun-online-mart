@@ -52,7 +52,7 @@ function legacyOptionSelections(productId: string): RawCheckoutOption[] {
   return bareOption ? [{ id: bareOption, quantity: 1 }] : [];
 }
 
-function cafeteriaHandlingFee(mealPortions: number, snackPortions: number) {
+function cafeteriaHandlingFee(mealPortions: number, snackPlanPortions: number) {
   // The first three lunch/dinner plates are subsidised by the cafeteria rate:
   // ₦800, ₦1,000, ₦1,200. Every plate after that adds ₦800.
   const mealExtra = mealPortions <= 1
@@ -61,12 +61,13 @@ function cafeteriaHandlingFee(mealPortions: number, snackPortions: number) {
       ? (mealPortions - 1) * 200
       : 400 + (mealPortions - 3) * 800;
 
-  // Snack-only baskets cover up to two portions in the ₦800 flat rate. When
-  // snacks accompany a meal, their surcharge follows the separate meal plan
-  // allowance requested by the cafeteria.
+  // Snack portions are ₦1,800 blocks of the snack subtotal (rounded up).
+  // Snack-only baskets cover up to two such blocks in the ₦800 flat rate.
+  // When snacks accompany a meal, their surcharge follows the cafeteria's
+  // separate meal-plan allowance.
   const snackExtra = mealPortions > 0
-    ? snackPortions === 0 ? 0 : snackPortions === 1 ? 200 : snackPortions === 2 ? 400 : 1000 + (snackPortions - 3) * 800
-    : snackPortions <= 2 ? 0 : snackPortions <= 4 ? 400 : 400 + (snackPortions - 4) * 800;
+    ? snackPlanPortions === 0 ? 0 : snackPlanPortions === 1 ? 200 : snackPlanPortions === 2 ? 400 : 1000 + (snackPlanPortions - 3) * 800
+    : snackPlanPortions <= 2 ? 0 : snackPlanPortions <= 4 ? 400 : 400 + (snackPlanPortions - 4) * 800;
 
   return mealExtra + snackExtra;
 }
@@ -148,8 +149,9 @@ export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delive
     return { source: 'cafeteria', product_id: null, cafeteria_product_id: product.id, product_name: product.name, unit_price: unitPrice, quantity: Math.floor(item.quantity), selected_options: selected, note: typeof item.note === 'string' && item.note.trim() ? item.note.trim().slice(0, 500) : null, meal_plan_credit: 0, packaging_fee: 0, meal_plan_eligible: Boolean(product.meal_plan_eligible), isMeal, isSnack };
   });
   const mealPortions = cafeteriaLines.filter((line) => line.isMeal).reduce((total, line) => total + line.quantity, 0);
-  const snackPortions = cafeteriaLines.filter((line) => line.isSnack).reduce((total, line) => total + line.quantity, 0);
-  const extraCafeteriaFee = cafeteriaHandlingFee(mealPortions, snackPortions);
+  const snackSubtotal = cafeteriaLines.filter((line) => line.isSnack).reduce((total, line) => total + line.unit_price * line.quantity, 0);
+  const snackPlanPortions = snackSubtotal > 0 ? Math.ceil(snackSubtotal / 1800) : 0;
+  const extraCafeteriaFee = cafeteriaHandlingFee(mealPortions, snackPlanPortions);
   // Store the surcharge on one cafeteria line for durable order records. The
   // column predates these wider handling rules, so it remains the compatible
   // source for receipts and portal reporting.

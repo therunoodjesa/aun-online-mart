@@ -10,15 +10,15 @@ const isCafeteria = (item: CartItem) => item.category?.toLowerCase().startsWith(
 const isMeal = (item: CartItem) => isCafeteria(item) && !item.category?.toLowerCase().includes('snacks');
 const isSnack = (item: CartItem) => isCafeteria(item) && item.category?.toLowerCase().includes('snacks') === true;
 
-export function cafeteriaHandlingFee(mealPortions: number, snackPortions: number) {
+export function cafeteriaHandlingFee(mealPortions: number, snackPlanPortions: number) {
   const mealExtra = mealPortions <= 1
     ? 0
     : mealPortions <= 3
       ? (mealPortions - 1) * 200
       : 400 + (mealPortions - 3) * 800;
   const snackExtra = mealPortions > 0
-    ? snackPortions === 0 ? 0 : snackPortions === 1 ? 200 : snackPortions === 2 ? 400 : 1000 + (snackPortions - 3) * 800
-    : snackPortions <= 2 ? 0 : snackPortions <= 4 ? 400 : 400 + (snackPortions - 4) * 800;
+    ? snackPlanPortions === 0 ? 0 : snackPlanPortions === 1 ? 200 : snackPlanPortions === 2 ? 400 : 1000 + (snackPlanPortions - 3) * 800
+    : snackPlanPortions <= 2 ? 0 : snackPlanPortions <= 4 ? 400 : 400 + (snackPlanPortions - 4) * 800;
   return mealExtra + snackExtra;
 }
 
@@ -29,12 +29,13 @@ export function calculateCheckout(items: CartItem[], deliveryType: 'dispatch' | 
   const standardSubtotal = standardItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const serviceFee = Math.round(standardSubtotal * AOM_SERVICE_FEE_RATE);
   const mealCount = cafeteriaItems.filter(isMeal).reduce((sum, item) => sum + item.quantity, 0);
-  const snackCount = cafeteriaItems.filter(isSnack).reduce((sum, item) => sum + item.quantity, 0);
+  const snackSubtotal = cafeteriaItems.filter(isSnack).reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const snackPlanPortions = snackSubtotal > 0 ? Math.ceil(snackSubtotal / MEAL_PLAN_ALLOWANCE) : 0;
   const eligibleSubtotal = cafeteriaItems.filter((item) => item.mealPlanEligible !== false).reduce((sum, item) => sum + item.price * item.quantity, 0);
   const mealPlanCredit = useMealPlan ? Math.min(eligibleSubtotal, Math.max(0, planCount) * MEAL_PLAN_ALLOWANCE) : 0;
-  const packagingFee = cafeteriaHandlingFee(mealCount, snackCount);
+  const packagingFee = cafeteriaHandlingFee(mealCount, snackPlanPortions);
   const cafeteriaDeliveryFee = deliveryType === 'dispatch' && cafeteriaItems.length ? CAFETERIA_DELIVERY_FLAT_RATE : 0;
   const standardDeliveryFee = deliveryType === 'dispatch' && standardItems.length ? STANDARD_DELIVERY_FEE : 0;
   const deliveryFee = cafeteriaDeliveryFee + standardDeliveryFee;
-  return { subtotal, standardSubtotal, serviceFee, mealCount, snackCount, eligibleSubtotal, mealPlanCredit, packagingFee, deliveryFee, total: subtotal - mealPlanCredit + packagingFee + deliveryFee + serviceFee };
+  return { subtotal, standardSubtotal, serviceFee, mealCount, snackPlanPortions, eligibleSubtotal, mealPlanCredit, packagingFee, deliveryFee, total: subtotal - mealPlanCredit + packagingFee + deliveryFee + serviceFee };
 }
