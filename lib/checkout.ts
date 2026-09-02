@@ -5,6 +5,7 @@ export const CAFETERIA_DELIVERY_FLAT_RATE = 800;
 export const STANDARD_DELIVERY_FEE = 2500;
 export const MEAL_PLAN_ALLOWANCE = 1800;
 export const AOM_SERVICE_FEE_RATE = 0.1;
+export const AOM_SERVICE_FEE_CAP = 15_000;
 
 const isCafeteria = (item: CartItem) => item.category?.toLowerCase().startsWith('cafeteria') ?? false;
 const isMeal = (item: CartItem) => isCafeteria(item) && !item.category?.toLowerCase().includes('snacks');
@@ -27,7 +28,7 @@ export function calculateCheckout(items: CartItem[], deliveryType: 'dispatch' | 
   const cafeteriaItems = items.filter(isCafeteria);
   const standardItems = items.filter((item) => !isCafeteria(item));
   const standardSubtotal = standardItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const serviceFee = Math.round(standardSubtotal * AOM_SERVICE_FEE_RATE);
+  const serviceFee = Math.min(AOM_SERVICE_FEE_CAP, Math.round(standardSubtotal * AOM_SERVICE_FEE_RATE));
   const mealCount = cafeteriaItems.filter(isMeal).reduce((sum, item) => sum + item.quantity, 0);
   const snackSubtotal = cafeteriaItems.filter(isSnack).reduce((sum, item) => sum + item.price * item.quantity, 0);
   const snackPlanPortions = snackSubtotal > 0 ? Math.ceil(snackSubtotal / MEAL_PLAN_ALLOWANCE) : 0;

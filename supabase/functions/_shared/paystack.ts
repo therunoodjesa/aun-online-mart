@@ -179,7 +179,9 @@ export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delive
   const lines = [...regularLines, ...cafeteriaLines];
   const subtotal = lines.reduce((total, line) => total + line.unit_price * line.quantity, 0);
   const marketplaceSubtotal = regularLines.reduce((total, line) => total + line.unit_price * line.quantity, 0);
-  const serviceFee = Math.round(marketplaceSubtotal * 0.1);
+  // AOM charges 10% on marketplace merchandise, capped at ₦15,000 for
+  // orders with a subtotal of ₦150,000 or more.
+  const serviceFee = Math.min(15_000, Math.round(marketplaceSubtotal * 0.1));
   const packagingFee = cafeteriaLines.reduce((total, line) => total + line.packaging_fee, 0);
   const mealPlanCredit = cafeteriaLines.reduce((total, line) => total + line.meal_plan_credit, 0);
   const vendorIds = [...new Set(products.map((product) => product.vendor_id).filter(Boolean))] as string[];
