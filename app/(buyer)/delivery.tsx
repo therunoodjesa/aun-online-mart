@@ -5,8 +5,6 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useCartStore } from '../../store/cartstore';
 import { supabase } from '../../lib/supabase';
-import { calculateCheckout } from '../../lib/checkout';
-import { remainingMealPlanCredits } from '../../lib/meal-plan';
 
 type ServerQuote = { total: number; mealPlanCredit?: number; campusDelivery?: { active?: boolean } };
 
@@ -46,19 +44,9 @@ export default function DeliveryPage() {
   const [address, setAddress] = useState('');
   const [directions, setDirections] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [planCount, setPlanCount] = useState(0);
   const [serverQuote, setServerQuote] = useState<ServerQuote | null>(null);
-  const checkout = useMemo(() => calculateCheckout(items, 'dispatch', mealPlan === 'true', planCount), [items, mealPlan, planCount]);
-
-  useEffect(() => {
-    const loadMealPlan = async () => {
-      const { data: auth } = await supabase.auth.getUser();
-      if (!auth.user) return;
-      const { data } = await supabase.from('meal_plan_accounts').select('plan_count, meals_used_today, last_used_on').eq('user_id', auth.user.id).maybeSingle();
-      setPlanCount(remainingMealPlanCredits(data));
-    };
-    void loadMealPlan();
-  }, []);
+  const needsServerQuote = items.length > 0 && items.every((item) => !item.productId.startsWith('service:'));
+  const quotePending = needsServerQuote && !serverQuote;
 
   useEffect(() => {
     const timer = setInterval(() => setClockTick(Date.now()), 60_000);
@@ -74,6 +62,7 @@ export default function DeliveryPage() {
     const loadQuote = async () => {
       const canUseProductQuote = items.length > 0 && items.every((item) => !item.productId.startsWith('service:'));
       if (!canUseProductQuote) { if (active) setServerQuote(null); return; }
+      if (active) setServerQuote(null);
       const quoteItems = items.map((item) => ({ productId: item.productId, quantity: item.quantity, selectedOptions: item.selectedOptions?.map((option) => ({ id: option.id, quantity: option.quantity })), note: item.note ?? null }));
       const { data, error } = await supabase.functions.invoke('checkout-quote', { body: { items: quoteItems, fulfilment: 'delivery', slot: slot || null, use_meal_plan: mealPlan === 'true' } });
       if (active) setServerQuote(!error && data?.pricing ? data.pricing as ServerQuote : null);
@@ -93,7 +82,7 @@ export default function DeliveryPage() {
         <View style={styles.itemsHeader}><Text style={styles.itemsHeading}>Cart items</Text><TouchableOpacity onPress={() => router.back()}><Text style={styles.edit}>Edit cart</Text></TouchableOpacity></View>
         <View style={styles.itemsCard}>{items.map((item, index) => <View key={item.productId} style={[styles.item, index < items.length - 1 && styles.itemDivider]}><View style={styles.itemImage}>{item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.itemImageFile} /> : <Ionicons name="restaurant-outline" size={28} color="#175E63" />}</View><Text numberOfLines={2} style={styles.itemName}>{item.name} ×{item.quantity}</Text><Text style={styles.itemPrice}>₦ {(item.price * item.quantity).toLocaleString('en-NG')}</Text></View>)}</View>
         {serverQuote?.campusDelivery?.active && <View style={styles.campusRate}><Ionicons name="location-outline" size={18} color="#175E63" /><Text style={styles.campusRateText}>₦500 campus delivery applied</Text></View>}
-        <TouchableOpacity style={[styles.payment, !address.trim() && styles.paymentDisabled]} onPress={() => { if (!address.trim()) { setEditingAddress(true); setShowSuggestions(true); Alert.alert('Add a delivery address', 'Enter a dorm, hall, room, or another delivery location before proceeding.'); return; } router.push({ pathname: '/(buyer)/payment', params: { address, directions: directions.trim(), slot, fulfilment: 'delivery', mealPlan: mealPlan ?? 'false' } }); }}><Text style={styles.paymentText}>PROCEED TO PAYMENT · ₦ {(serverQuote?.total ?? checkout.total).toLocaleString('en-NG')}</Text></TouchableOpacity>
+        <TouchableOpacity disabled={!address.trim() || quotePending} style={[styles.payment, (!address.trim() || quotePending) && styles.paymentDisabled]} onPress={() => { if (!address.trim()) { setEditingAddress(true); setShowSuggestions(true); Alert.alert('Add a delivery address', 'Enter a dorm, hall, room, or another delivery location before proceeding.'); return; } router.push({ pathname: '/(buyer)/payment', params: { address, directions: directions.trim(), slot, fulfilment: 'delivery', mealPlan: mealPlan ?? 'false' } }); }}><Text style={styles.paymentText}>{quotePending ? 'CALCULATING EXACT TOTAL…' : `PROCEED TO PAYMENT · ₦ ${(serverQuote?.total ?? 0).toLocaleString('en-NG')}`}</Text></TouchableOpacity>
       </View>
     </ScrollView>
   </View>;
