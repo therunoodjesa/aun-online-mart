@@ -11,6 +11,7 @@ import { supabase } from '../../lib/supabase';
 import { calculateCheckout } from '../../lib/checkout';
 import { remainingMealPlanCredits } from '../../lib/meal-plan';
 import { posthog } from '../../lib/posthog';
+import { recordJourneyEvent } from '../../lib/journey';
 import { getVendorAvailabilityMap } from '../../lib/vendor-availability';
 import { friendlyError } from '../../lib/user-error';
 
@@ -159,7 +160,9 @@ export default function PaymentPage() {
     setPaying(false);
     if (error || !data?.authorization_url) { setPaymentMessage(friendlyError(data?.error ?? error, 'Secure checkout did not open. Check your internet connection and tap Pay again. You have not been charged.')); return; }
     if (data.pricing) setServerQuote(data.pricing as ServerQuote);
-    posthog.capture('payment_started', { method: 'paystack', total, item_count: itemCount, fulfilment: isPickup ? 'pickup' : 'delivery' });
+    const paymentProperties = { method: 'paystack', total, item_count: itemCount, fulfilment: isPickup ? 'pickup' : 'delivery' };
+    posthog.capture('payment_started', paymentProperties);
+    void recordJourneyEvent('payment_started', '/payment', paymentProperties);
     checkoutOpenedRef.current = true;
     setPaymentReference(data.reference);
     await AsyncStorage.setItem(PENDING_PAYMENT_REFERENCE, data.reference);
@@ -221,7 +224,9 @@ export default function PaymentPage() {
       setPaymentMessage(friendlyError(data?.error ?? error, 'Your transfer notice was not sent. Check your internet connection and submit it again.'));
       return;
     }
-    posthog.capture('payment_started', { method: 'bank_transfer', total, item_count: itemCount, fulfilment: isPickup ? 'pickup' : 'delivery' });
+    const paymentProperties = { method: 'bank_transfer', total, item_count: itemCount, fulfilment: isPickup ? 'pickup' : 'delivery' };
+    posthog.capture('payment_started', paymentProperties);
+    void recordJourneyEvent('payment_started', '/payment', paymentProperties);
     await AsyncStorage.removeItem(PENDING_PAYMENT_REFERENCE);
     clearCart();
     router.replace({ pathname: '/(buyer)/order/[orderId]', params: { orderId: data.order_id, fulfilment: isPickup ? 'pickup' : 'delivery', address: address ?? '' } });

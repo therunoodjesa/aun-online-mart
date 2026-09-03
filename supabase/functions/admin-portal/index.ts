@@ -2,6 +2,7 @@ import { admin, corsHeaders, getUser, json } from '../_shared/paystack.ts';
 
 type AdminRequest =
   | { action: 'dashboard' }
+  | { action: 'activity_feed' }
   | { action: 'confirm_transfer'; intent_id: string }
   | { action: 'cancel_transfer'; intent_id: string }
   | { action: 'review_vendor'; application_id: string; decision: 'approved' | 'rejected'; reviewer_note?: string }
@@ -168,6 +169,39 @@ async function updateHomePromo(db: ReturnType<typeof admin>, promotion: { headin
   const { data, error } = await db.from('home_promotions').upsert({ id: true, heading, message, background_image_url: backgroundImage, background_color: backgroundColor, cta_label: ctaLabel, cta_href: ctaHref, updated_at: new Date().toISOString() }).select('heading, message, background_image_url, background_color, cta_label, cta_href, updated_at').single();
   if (error) throw new Error(error.message);
   return { home_promo: data };
+}
+
+async function activityFeed(db: ReturnType<typeof admin>) {
+  const { data: sessions, error: sessionsError } = await db.from('customer_journey_sessions')
+    .select('session_id, user_id, anonymous_id, current_route, last_event_name, last_event_at, started_at')
+    .order('last_event_at', { ascending: false }).limit(60);
+  if (sessionsError) throw new Error(sessionsError.message);
+  const sessionIds = (sessions ?? []).map((session) => session.session_id);
+  const userIds = [...new Set((sessions ?? []).map((session) => session.user_id).filter(Boolean))];
+  const [{ data: profiles, error: profilesError }, { data: events, error: eventsError }] = await Promise.all([
+    userIds.length ? db.from('profiles').select('id, full_name').in('id', userIds) : Promise.resolve({ data: [], error: null }),
+    sessionIds.length ? db.from('customer_journey_events').select('session_id, event_name, route, properties, created_at').in('session_id', sessionIds).order('created_at', { ascending: false }).limit(300) : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (profilesError) throw new Error(profilesError.message);
+  if (eventsError) throw new Error(eventsError.message);
+  const profileById = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
+  const eventsBySession = new Map<string, typeof events>();
+  for (const event of events ?? []) {
+    const entries = eventsBySession.get(event.session_id) ?? [];
+    entries.push(event);
+    eventsBySession.set(event.session_id, entries);
+  }
+  return {
+    sessions: (sessions ?? []).map((session) => {
+      const profile = session.user_id ? profileById.get(session.user_id) : null;
+      const visitorLabel = session.anonymous_id ? `Visitor ${session.anonymous_id.slice(-4).toUpperCase()}` : 'Visitor';
+      return {
+        ...session,
+        customer_name: profile?.full_name?.trim() || visitorLabel,
+        events: (eventsBySession.get(session.session_id) ?? []).slice(0, 12),
+      };
+    }),
+  };
 }
 
 async function notifyDispatch(db: ReturnType<typeof admin>, order: { id: string; user_id: string | null; order_number: string }, title: string, body: string) {
@@ -346,6 +380,7 @@ Deno.serve(async (request) => {
     const body = await request.json() as AdminRequest;
     const { db } = await requireAdmin(request);
     if (body.action === 'dashboard') return json(await dashboard(db));
+    if (body.action === 'activity_feed') return json(await activityFeed(db));
     if (body.action === 'confirm_transfer') return json(await confirmTransfer(db, body.intent_id));
     if (body.action === 'cancel_transfer') return json(await cancelTransfer(db, body.intent_id));
     if (body.action === 'update_payout') return json(await updatePayout(db, body.payout_id, body.status, body.note));

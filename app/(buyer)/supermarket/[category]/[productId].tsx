@@ -9,6 +9,7 @@ import { FavouriteButton } from '../../../../components/FavouriteButton';
 import { isFavourited } from '../../../../lib/favourites';
 import { CartToast } from '../../../../components/CartToast';
 import { vendorCanAcceptOrders } from '../../../../lib/vendor-availability';
+import { recordJourneyEvent } from '../../../../lib/journey';
 
 const COLORS = { navy: '#01193D', mint: '#68ECCB', cream: '#F8F3ED', white: '#FFFFFF', muted: '#8793A5', line: '#D7DEE8' } as const;
 const FALLBACK_IMAGE = require('../../../../assets/images/home/all-products.png');
@@ -45,6 +46,7 @@ export default function SupermarketProductPage() {
       const { data } = await supabase.from('products').select('id, vendor_id, name, description, price, image_url, category, status').eq('id', productId).single();
       if (!data) { if (mounted) setLoading(false); return; }
       const item = data as Product;
+      void recordJourneyEvent('product_viewed', `/supermarket/${category ?? 'all-products'}/${item.id}`, { product_id: item.id, product_name: item.name, category: item.category ?? 'supermarket' });
       const [{ data: optionRows }, { data: relatedRows }] = await Promise.all([
         supabase.from('product_options').select('id, option_group, name, price_modifier, is_available').eq('product_id', item.id).eq('is_available', true),
         supabase.from('products').select('id, vendor_id, name, description, price, image_url, category, status').eq('status', 'available').is('marketplace_category', null).eq('category', item.category ?? '').neq('id', item.id).limit(6),

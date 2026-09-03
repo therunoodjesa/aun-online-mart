@@ -4,6 +4,7 @@ import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { PostHogProvider } from 'posthog-react-native';
 import { Analytics } from '@vercel/analytics/react';
 import { posthog } from '../lib/posthog';
+import { recordJourneyEvent, touchJourneySession } from '../lib/journey';
 import './global.css';
 
 export default function RootLayout() {
@@ -14,7 +15,13 @@ export default function RootLayout() {
   useEffect(() => {
     if (previousPathname.current === pathname) return;
     posthog.screen(pathname, { previous_screen: previousPathname.current });
+    void recordJourneyEvent('screen_viewed', pathname, { previous_screen: previousPathname.current ?? 'start' });
     previousPathname.current = pathname;
+  }, [pathname]);
+  useEffect(() => {
+    void touchJourneySession(pathname);
+    const heartbeat = setInterval(() => void touchJourneySession(pathname), 60_000);
+    return () => clearInterval(heartbeat);
   }, [pathname]);
   const isPortal = pathname.startsWith('/vendor') || pathname.startsWith('/admin-portal') || pathname.startsWith('/cafeteria-portal');
   const buyerMobileRoutes = ['/', '/cart', '/cafeteria', '/services', '/profile', '/faq', '/delivery', '/payment', '/order', '/notifications', '/marketplace', '/supermarket'];

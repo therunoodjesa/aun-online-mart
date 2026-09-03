@@ -9,6 +9,7 @@ import { FavouriteButton } from '../../../../components/FavouriteButton';
 import { isFavourited } from '../../../../lib/favourites';
 import { CartToast } from '../../../../components/CartToast';
 import { vendorCanAcceptOrders } from '../../../../lib/vendor-availability';
+import { recordJourneyEvent } from '../../../../lib/journey';
 
 type Product = { id: string; vendor_id: string; name: string; description: string | null; price: number; category: string | null; image_url: string | null; status: string };
 type ProductOption = { id: string; option_group: string; name: string; price_modifier: number; is_available: boolean; selection_mode?: 'multiple' | 'single' };
@@ -41,6 +42,7 @@ export default function MarketplaceProductPage() {
       const { data } = await supabase.from('products').select('id, vendor_id, name, description, price, category, image_url, status').eq('id', productId).single();
       if (data) {
         const item = data as Product;
+        void recordJourneyEvent('product_viewed', `/marketplace/${item.vendor_id}/${item.id}`, { product_id: item.id, product_name: item.name, category: item.category ?? 'marketplace' });
         setProduct(item);
         const [{ data: vendor }, { data: optionData }, { data: relatedRows }] = await Promise.all([
           supabase.from('vendors').select('name').eq('id', item.vendor_id).single(),
