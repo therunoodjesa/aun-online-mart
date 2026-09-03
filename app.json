@@ -2,6 +2,7 @@
   "expo": {
     "name": "AUN Online Mart",
     "slug": "aun-online-mart",
+    "icon": "./assets/images/aom-logo.png",
     "scheme": "aunonlinemart",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -24,6 +25,9 @@
       "url": "https://u.expo.dev/cb7a38fe-e03e-40ad-8c90-95337b7dbc4c"
     },
     "android": {},
+    "web": {
+      "favicon": "./public/favicon.png"
+    },
     "plugins": [
       "expo-web-browser"
     ]

@@ -10,8 +10,8 @@ export default function RootHtml({ children }: PropsWithChildren) {
         <meta name="theme-color" content="#01193D" />
         <title>AUN Online Mart</title>
         <meta name="description" content="Shop campus favourites, groceries, cafeteria meals, and services through AUN Online Mart." />
-        <link rel="icon" href="/aom-icon.svg" type="image/svg+xml" />
-        <link rel="shortcut icon" href="/aom-icon.svg" type="image/svg+xml" />
+        <link rel="icon" href="/favicon.png" type="image/png" />
+        <link rel="shortcut icon" href="/favicon.png" type="image/png" />
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="AUN Online Mart" />
         <meta property="og:title" content="AUN Online Mart" />
