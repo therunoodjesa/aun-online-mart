@@ -541,19 +541,36 @@ function AvailabilitySettings({ value, canManage, onSaved }: { value: Settings; 
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
   useEffect(() => setDraft(value), [value]);
-  const toggle = (key: keyof Settings) => setDraft((current) => ({ ...current, [key]: !current[key] }));
-  const save = async () => {
+  const persist = async (next: Settings) => {
     setSaving(true);
-    const { data: auth } = await supabase.auth.getUser();
-    const payload = { is_accepting_orders: draft.is_accepting_orders, snacks_open: draft.snacks_open, lunch_open: draft.lunch_open, dinner_open: draft.dinner_open, customer_notice: draft.customer_notice?.trim() || null, updated_by: auth.user?.id ?? null, updated_at: new Date().toISOString() };
-    const { data, error } = await supabase.from('cafeteria_settings').update(payload).eq('id', true).select('*').single();
+    const { data, error } = await supabase.rpc('update_cafeteria_settings', {
+      p_is_accepting_orders: next.is_accepting_orders,
+      p_snacks_open: next.snacks_open,
+      p_lunch_open: next.lunch_open,
+      p_dinner_open: next.dinner_open,
+      p_customer_notice: next.customer_notice?.trim() || null,
+    });
     setSaving(false);
-    if (error) Alert.alert('Settings not saved', friendlyError(error, 'Only a cafeteria manager can change these settings.')); else onSaved(data as Settings);
+    if (error) {
+      setDraft(value);
+      Alert.alert('Availability not changed', friendlyError(error, 'Check that you are signed in as the cafeteria manager, then try again.'));
+      return;
+    }
+    const saved = data as Settings;
+    setDraft(saved);
+    onSaved(saved);
   };
+  const toggle = (key: keyof Settings) => {
+    if (saving || !canManage) return;
+    const next = { ...draft, [key]: !draft[key] } as Settings;
+    setDraft(next);
+    void persist(next);
+  };
+  const save = () => void persist(draft);
   return <>
     <PageHead title="Availability & customer notice" subtitle="Pause cafeteria checkout, open or close individual service periods, and publish an operational notice." />
     {!canManage ? <View style={styles.readOnly}><Ionicons name="lock-closed-outline" size={20} color="#805E15" /><Text style={styles.readOnlyText}>These settings are read-only for your role. A cafeteria manager can make changes.</Text></View> : null}
-    <View style={styles.settingsPanel}><ToggleRow label="Accept cafeteria orders" copy="Turn this off to pause the entire cafeteria without hiding menu items." value={draft.is_accepting_orders} disabled={!canManage} onPress={() => toggle('is_accepting_orders')} />{periods.map((period) => <ToggleRow key={period} label={`${period[0].toUpperCase() + period.slice(1)} service`} copy={`Customers can browse and order products tagged for ${period}.`} value={Boolean(draft[`${period}_open` as keyof Settings])} disabled={!canManage} onPress={() => toggle(`${period}_open` as keyof Settings)} />)}<Text style={styles.fieldLabel}>Important customer notice</Text><TextInput editable={canManage} value={draft.customer_notice ?? ''} onChangeText={(customer_notice) => setDraft((current) => ({ ...current, customer_notice }))} multiline maxLength={280} placeholder="e.g. Lunch service begins at 12:30 today." placeholderTextColor="#98A2AE" style={styles.noticeInput} />{canManage ? <TouchableOpacity disabled={saving} style={styles.saveSettings} onPress={() => void save()}>{saving ? <ActivityIndicator color="#01193D" /> : <><Ionicons name="save-outline" size={19} color="#01193D" /><Text style={styles.saveSettingsText}>Save cafeteria settings</Text></>}</TouchableOpacity> : null}</View>
+    <View style={styles.settingsPanel}><ToggleRow label="Accept cafeteria orders" copy="Saves immediately. Turn this off to pause the entire cafeteria without hiding menu items." value={draft.is_accepting_orders} disabled={!canManage || saving} onPress={() => toggle('is_accepting_orders')} />{periods.map((period) => <ToggleRow key={period} label={`${period[0].toUpperCase() + period.slice(1)} service`} copy="Saves immediately. Customers can browse and order products tagged for this period." value={Boolean(draft[`${period}_open` as keyof Settings])} disabled={!canManage || saving} onPress={() => toggle(`${period}_open` as keyof Settings)} />)}<Text style={styles.fieldLabel}>Important customer notice</Text><TextInput editable={canManage && !saving} value={draft.customer_notice ?? ''} onChangeText={(customer_notice) => setDraft((current) => ({ ...current, customer_notice }))} multiline maxLength={280} placeholder="e.g. Lunch service begins at 12:30 today." placeholderTextColor="#98A2AE" style={styles.noticeInput} />{canManage ? <TouchableOpacity disabled={saving} style={styles.saveSettings} onPress={save}>{saving ? <ActivityIndicator color="#01193D" /> : <><Ionicons name="save-outline" size={19} color="#01193D" /><Text style={styles.saveSettingsText}>Save customer notice</Text></>}</TouchableOpacity> : null}</View>
   </>;
 }
 
