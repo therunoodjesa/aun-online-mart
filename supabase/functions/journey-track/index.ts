@@ -1,4 +1,4 @@
-import { admin, getUser, json } from '../_shared/paystack.ts';
+import { admin, corsHeaders, getUser, json } from '../_shared/paystack.ts';
 
 type JourneyRequest = {
   session_id?: unknown;
@@ -23,6 +23,7 @@ const safeProperties = (value: unknown) => {
 };
 
 Deno.serve(async (request) => {
+  if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (request.method !== 'POST') return json({ error: 'Method not allowed.' }, 405);
   try {
     const body = await request.json() as JourneyRequest;

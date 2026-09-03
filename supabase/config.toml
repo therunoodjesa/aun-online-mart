@@ -1,2 +1,5 @@
 [functions.paystack-webhook]
 verify_jwt = false
+
+[functions.journey-track]
+verify_jwt = false
