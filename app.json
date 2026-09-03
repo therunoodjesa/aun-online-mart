@@ -26,7 +26,7 @@
     },
     "android": {},
     "web": {
-      "favicon": "./public/aom-icon.svg"
+      "favicon": "./public/favicon.png"
     },
     "plugins": [
       "expo-web-browser"
