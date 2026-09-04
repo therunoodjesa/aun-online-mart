@@ -23,13 +23,15 @@ export default function SupportPage() {
 
   const invoke = async (body: object) => {
     const { data, error } = await supabase.functions.invoke('support-tickets', { body });
-    if (error || data?.error) throw new Error(data?.error ?? error?.message ?? 'Support is unavailable right now.');
+    // Keep implementation details out of the buyer experience. The team can inspect
+    // technical failures separately, while customers receive a useful next step.
+    if (error || data?.error) throw new Error('We could not complete that request right now. Please check your connection and try again.');
     return data;
   };
   const loadTickets = useCallback(async () => {
     setLoading(true);
     try { const data = await invoke({ action: 'list' }); setTickets((data.tickets ?? []) as Ticket[]); }
-    catch (error) { setFeedback(error instanceof Error ? error.message : 'Could not load your support requests.'); }
+    catch { setFeedback('We could not load your requests right now. Please check your connection and try again.'); }
     finally { setLoading(false); }
   }, []);
   useFocusEffect(useCallback(() => { void loadTickets(); }, [loadTickets]));
@@ -41,7 +43,7 @@ export default function SupportPage() {
       await invoke({ action: 'create', category, subject: subject.trim(), message: message.trim() });
       setSubject(''); setMessage(''); setTab('tickets'); setFeedback('Your support request was sent. We will reply here and notify you.');
       await loadTickets();
-    } catch (error) { setFeedback(error instanceof Error ? error.message : 'Your request could not be sent. Please try again.'); }
+    } catch { setFeedback('Your request could not be sent right now. Please check your connection and try again.'); }
     finally { setSending(false); }
   };
 
