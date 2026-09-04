@@ -110,6 +110,15 @@ Deno.serve(async (request) => {
       if (updateError) throw new Error(updateError.message);
     }
     const notificationId = await notifyBuyer(db, order, copy.title(vendor.name), copy.message, copy.kind);
+    if (changed && body.status === 'ready' && order.delivery_type === 'pickup') {
+      try {
+        await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/order-status-email`, {
+          method: 'POST',
+          headers: { 'X-Internal-Secret': Deno.env.get('ORDER_EMAIL_INTERNAL_SECRET') ?? Deno.env.get('VENDOR_ALERT_INTERNAL_SECRET') ?? '', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order_id: order.id, event: 'ready_for_pickup' }),
+        });
+      } catch (emailError) { console.error('Pickup email could not be started', emailError); }
+    }
     if (changed) await captureServerEvent(user.id, 'vendor_order_status_updated', { order_id: order.id, status: body.status });
     return json({ status: body.status, notification_id: notificationId, already_updated: !changed });
   } catch (error) {

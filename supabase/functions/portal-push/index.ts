@@ -1,16 +1,22 @@
 import * as webpush from 'jsr:@negrel/webpush@^0.5.0';
-import { admin, json } from '../_shared/paystack.ts';
+import { admin, corsHeaders, getUser, json } from '../_shared/paystack.ts';
 
-type PushRequest = { user_ids?: string[]; title?: string; body?: string; url?: string; tag?: string };
+type PushRequest = { user_ids?: string[]; title?: string; body?: string; url?: string; tag?: string; test?: boolean };
 
 Deno.serve(async (request) => {
+  if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (request.method !== 'POST') return json({ error: 'Method not allowed.' }, 405);
-  const expectedSecret = Deno.env.get('PORTAL_PUSH_INTERNAL_SECRET');
-  if (!expectedSecret || request.headers.get('X-Internal-Secret') !== expectedSecret) return json({ error: 'Unauthorized.' }, 401);
 
   try {
     const body = await request.json() as PushRequest;
-    const userIds = [...new Set((body.user_ids ?? []).filter((value): value is string => typeof value === 'string' && value.length > 0))];
+    const expectedSecret = Deno.env.get('PORTAL_PUSH_INTERNAL_SECRET');
+    const internalRequest = Boolean(expectedSecret && request.headers.get('X-Internal-Secret') === expectedSecret);
+    const user = internalRequest ? null : await getUser(request);
+    if (!internalRequest && !user) return json({ error: 'Please sign in before testing device alerts.' }, 401);
+    if (!internalRequest && body.test !== true) return json({ error: 'This endpoint only accepts a personal device-alert test.' }, 403);
+    const userIds = internalRequest
+      ? [...new Set((body.user_ids ?? []).filter((value): value is string => typeof value === 'string' && value.length > 0))]
+      : [user!.id];
     if (!userIds.length) return json({ status: 'skipped', reason: 'No recipient users.' });
     const rawKeys = Deno.env.get('WEB_PUSH_VAPID_KEYS_JSON');
     if (!rawKeys) return json({ status: 'skipped', reason: 'Web Push is not configured.' });
@@ -30,10 +36,10 @@ Deno.serve(async (request) => {
       vapidKeys: keys,
     });
     const payload = JSON.stringify({
-      title: (body.title || 'AUN Online Mart').slice(0, 90),
-      body: (body.body || 'There is an update waiting for you.').slice(0, 240),
-      url: body.url?.startsWith('/') ? body.url : '/vendor-portal',
-      tag: (body.tag || 'aom-operations').slice(0, 100),
+      title: (internalRequest ? body.title : 'AOM alerts are ready').slice(0, 90),
+      body: (internalRequest ? body.body : 'This device will receive order updates from AUN Online Mart.').slice(0, 240),
+      url: internalRequest && body.url?.startsWith('/') ? body.url : '/vendor-portal',
+      tag: (internalRequest ? body.tag : 'aom-push-test').slice(0, 100),
     });
     let sent = 0;
     const expiredIds: string[] = [];

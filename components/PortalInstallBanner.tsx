@@ -9,7 +9,7 @@ export function PortalInstallBanner() {
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [isIos, setIsIos] = useState(false);
   const [installed, setInstalled] = useState(false);
-  const [alertStatus, setAlertStatus] = useState<'idle' | 'enabling' | 'enabled' | 'unavailable' | 'blocked' | 'error'>('idle');
+  const [alertStatus, setAlertStatus] = useState<'idle' | 'enabling' | 'testing' | 'enabled' | 'tested' | 'unavailable' | 'blocked' | 'error'>('idle');
   const vapidPublicKey = process.env.EXPO_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY;
 
   useEffect(() => {
@@ -99,8 +99,21 @@ export function PortalInstallBanner() {
       }, { onConflict: 'endpoint' });
       if (error) throw error;
       setAlertStatus('enabled');
+      await testAlerts();
     } catch (error) {
       console.warn('Unable to enable portal alerts', error);
+      setAlertStatus('error');
+    }
+  };
+
+  const testAlerts = async () => {
+    try {
+      setAlertStatus('testing');
+      const { data, error } = await supabase.functions.invoke('portal-push', { body: { test: true } });
+      if (error || data?.status !== 'complete' || Number(data?.sent ?? 0) < 1) throw new Error(data?.reason ?? error?.message ?? 'The alert could not be delivered.');
+      setAlertStatus('tested');
+    } catch (error) {
+      console.warn('Unable to send portal push test', error);
       setAlertStatus('error');
     }
   };
@@ -109,7 +122,8 @@ export function PortalInstallBanner() {
   const installingCopy = isIos
     ? 'In Safari, tap Share, then Add to Home Screen. Open the installed app to enable alerts.'
     : 'Install this workspace for faster access to orders, stock and store updates.';
-  const alertCopy = alertStatus === 'enabled' ? 'Order alerts are enabled on this device.'
+  const alertCopy = alertStatus === 'tested' ? 'Test alert delivered. This device is ready for order updates.'
+    : alertStatus === 'enabled' ? 'Device registered. Send a test alert to confirm delivery.'
     : alertStatus === 'blocked' ? 'Alerts are blocked in this browser. Enable notifications in its site settings, then try again.'
       : alertStatus === 'unavailable' ? 'Alerts need a secure browser and AOM’s device-alert key. Use the deployed portal, not a preview or in-app browser.'
         : alertStatus === 'error' ? 'We could not save alerts for this device. Check your connection and try again.'
@@ -117,7 +131,8 @@ export function PortalInstallBanner() {
   return <View style={styles.card}>
     <View style={styles.icon}><Ionicons name="phone-portrait-outline" size={22} color="#176E73" /></View>
     <View style={styles.copy}><Text style={styles.title}>{canEnableAlerts ? 'Turn on order alerts' : 'Use AOM Operations like an app'}</Text><Text style={styles.text}>{canEnableAlerts ? alertCopy : installingCopy}</Text></View>
-    {canEnableAlerts && alertStatus !== 'enabled' ? <TouchableOpacity disabled={alertStatus === 'enabling'} onPress={() => void enableAlerts()} style={styles.button}><Text style={styles.buttonText}>{alertStatus === 'enabling' ? 'Enabling…' : 'Enable alerts'}</Text></TouchableOpacity> : null}
+    {canEnableAlerts && !['enabled', 'tested'].includes(alertStatus) ? <TouchableOpacity disabled={alertStatus === 'enabling' || alertStatus === 'testing'} onPress={() => void enableAlerts()} style={styles.button}><Text style={styles.buttonText}>{alertStatus === 'enabling' ? 'Enabling…' : alertStatus === 'testing' ? 'Testing…' : 'Enable alerts'}</Text></TouchableOpacity> : null}
+    {canEnableAlerts && alertStatus === 'enabled' ? <TouchableOpacity onPress={() => void testAlerts()} style={styles.button}><Text style={styles.buttonText}>Test alert</Text></TouchableOpacity> : null}
     {!installed && installPrompt ? <TouchableOpacity onPress={() => void install()} style={styles.button}><Text style={styles.buttonText}>Install</Text></TouchableOpacity> : null}
   </View>;
 }

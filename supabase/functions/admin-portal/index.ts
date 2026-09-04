@@ -253,6 +253,14 @@ async function updateDispatch(db: ReturnType<typeof admin>, orderId: string, sta
   if (updateError) throw new Error(updateError.message);
   const body = status === 'picked_up' ? `${order.rider_name} has picked up order #${order.order_number} and is on the way.` : `Order #${order.order_number} has been delivered. Enjoy!`;
   await notifyDispatch(db, order, status === 'picked_up' ? 'Your order is on the way' : 'Order delivered', body);
+  // Email delivery is best-effort: an email failure must never undo an order update.
+  try {
+    await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/order-status-email`, {
+      method: 'POST',
+      headers: { 'X-Internal-Secret': Deno.env.get('ORDER_EMAIL_INTERNAL_SECRET') ?? Deno.env.get('VENDOR_ALERT_INTERNAL_SECRET') ?? '', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_id: order.id, event: status === 'picked_up' ? 'on_its_way' : 'delivered' }),
+    });
+  } catch (emailError) { console.error('Customer status email could not be started', emailError); }
   return { status };
 }
 

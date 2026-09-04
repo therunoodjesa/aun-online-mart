@@ -213,7 +213,11 @@ export default function CafeteriaPortalWorkspace() {
           const { error } = await supabase.rpc('update_cafeteria_order_status', { p_order_id: order.id, p_status: status });
           setWorkingId('');
           if (error) Alert.alert('Order not updated', friendlyError(error, 'Refresh the order board and try the next available action.'));
-          else { setFeedback(`Order #${order.order_number} is now ${status.replaceAll('_', ' ')}. The customer was notified.`); await loadOrders(); }
+          else {
+            const event = status === 'ready' && order.delivery_type === 'pickup' ? 'ready_for_pickup' : status === 'out_for_delivery' ? 'on_its_way' : status === 'delivered' ? 'delivered' : null;
+            if (event) void supabase.functions.invoke('order-status-email', { body: { order_id: order.id, event } });
+            setFeedback(`Order #${order.order_number} is now ${status.replaceAll('_', ' ')}. The customer was notified.`); await loadOrders();
+          }
         }} /> : null}
         {section === 'dispatch' ? <WalkingDispatch orders={orders} role={staff.role} onChanged={async (message) => { setFeedback(message); await loadOrders(); }} /> : null}
         {section === 'report' ? <Report orders={orders} products={products} /> : null}
@@ -431,6 +435,7 @@ function WalkingDispatch({ orders, role, onChanged }: { orders: CafeteriaOrder[]
     const { error } = await supabase.rpc('update_cafeteria_order_status', { p_order_id: order.id, p_status: status });
     setLoadingOrder('');
     if (error) { Alert.alert('Delivery not updated', friendlyError(error, 'Refresh and try the delivery update again.')); return; }
+    void supabase.functions.invoke('order-status-email', { body: { order_id: order.id, event: status === 'out_for_delivery' ? 'on_its_way' : 'delivered' } });
     await onChanged(status === 'out_for_delivery' ? `Order #${order.order_number} was collected. The customer was notified.` : `Order #${order.order_number} was marked delivered.`);
     await loadDirectory();
   };
