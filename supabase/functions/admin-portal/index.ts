@@ -172,10 +172,16 @@ async function updateHomePromo(db: ReturnType<typeof admin>, promotion: { headin
 }
 
 async function activityFeed(db: ReturnType<typeof admin>) {
-  const { data: sessions, error: sessionsError } = await db.from('customer_journey_sessions')
-    .select('session_id, user_id, anonymous_id, current_route, last_event_name, last_event_at, started_at')
-    .order('last_event_at', { ascending: false }).limit(60);
+  const [{ data: sessions, error: sessionsError }, { data: summarySessions, error: summarySessionsError }, { data: pageViews, error: pageViewsError }, { count: paidOrderCount, error: paidOrderError }] = await Promise.all([
+    db.from('customer_journey_sessions').select('session_id, user_id, anonymous_id, current_route, last_event_name, last_event_at, started_at').order('last_event_at', { ascending: false }).limit(60),
+    db.from('customer_journey_sessions').select('session_id, started_at, last_event_at').order('last_event_at', { ascending: false }).limit(5000),
+    db.from('customer_journey_events').select('route').eq('event_name', 'screen_viewed').not('route', 'is', null).limit(5000),
+    db.from('orders').select('*', { count: 'exact', head: true }).eq('payment_status', 'paid'),
+  ]);
   if (sessionsError) throw new Error(sessionsError.message);
+  if (summarySessionsError) throw new Error(summarySessionsError.message);
+  if (pageViewsError) throw new Error(pageViewsError.message);
+  if (paidOrderError) throw new Error(paidOrderError.message);
   const sessionIds = (sessions ?? []).map((session) => session.session_id);
   const userIds = [...new Set((sessions ?? []).map((session) => session.user_id).filter(Boolean))];
   const [{ data: profiles, error: profilesError }, { data: events, error: eventsError }] = await Promise.all([
@@ -191,7 +197,21 @@ async function activityFeed(db: ReturnType<typeof admin>) {
     entries.push(event);
     eventsBySession.set(event.session_id, entries);
   }
+  const pageCounts = new Map<string, number>();
+  for (const pageView of pageViews ?? []) {
+    if (!pageView.route) continue;
+    pageCounts.set(pageView.route, (pageCounts.get(pageView.route) ?? 0) + 1);
+  }
+  const [mostVisitedPage = null, mostVisitedPageViews = 0] = [...pageCounts.entries()].sort((a, b) => b[1] - a[1])[0] ?? [];
+  const durations = (summarySessions ?? []).map((session) => Math.max(0, new Date(session.last_event_at).getTime() - new Date(session.started_at).getTime()));
   return {
+    summary: {
+      unique_visitors: (summarySessions ?? []).length,
+      most_visited_page: mostVisitedPage,
+      most_visited_page_views: mostVisitedPageViews,
+      average_session_seconds: durations.length ? Math.round(durations.reduce((total, duration) => total + duration, 0) / durations.length / 1000) : 0,
+      paid_orders: paidOrderCount ?? 0,
+    },
     sessions: (sessions ?? []).map((session) => {
       const profile = session.user_id ? profileById.get(session.user_id) : null;
       const visitorLabel = session.anonymous_id ? `Visitor ${session.anonymous_id.slice(-4).toUpperCase()}` : 'Visitor';

@@ -17,7 +17,7 @@ type HomePromo = { heading: string; message: string; background_image_url: strin
 type DashboardData = { metrics: { pending_transfers: number; pending_vendor_applications: number; paid_orders: number; pending_payouts: number; dispatch_queue: number; gross_sales: number; sales_last_30_days: number; average_order_value: number; partner_vendors: number; top_vendors: { id: string; name: string; sales: number; orders: number }[] }; pending_transfers: Transfer[]; pending_vendor_applications: Application[]; pending_payouts: Payout[]; dispatch_queue: DispatchOrder[]; delivery_riders: Rider[]; orders: AdminOrder[]; home_promo: HomePromo | null };
 type JourneyEvent = { event_name: string; route: string | null; properties: Record<string, unknown>; created_at: string };
 type JourneySession = { session_id: string; customer_name: string; current_route: string | null; last_event_name: string | null; last_event_at: string; started_at: string; events: JourneyEvent[] };
-type JourneyFeed = { sessions: JourneySession[] };
+type JourneyFeed = { sessions: JourneySession[]; summary: { unique_visitors: number; most_visited_page: string | null; most_visited_page_views: number; average_session_seconds: number; paid_orders: number } };
 type Page = 'overview' | 'orders' | 'transfers' | 'vendors' | 'payouts' | 'dispatch' | 'home' | 'activity';
 
 const money = (kobo: number) => `₦${(Number(kobo) / 100).toLocaleString('en-NG')}`;
@@ -225,8 +225,22 @@ function journeyMessage(event: JourneyEvent) {
   return event.event_name.replaceAll('_', ' ');
 }
 
+function journeyPageLabel(route: string | null) {
+  if (!route || route === '/(buyer)' || route === '/(buyer)/') return 'Home';
+  const label = route.replace('/(buyer)/', '').replace(/^\//, '').replaceAll('-', ' ').replaceAll('/', ' › ');
+  return label ? label.replace(/\b\w/g, (letter) => letter.toUpperCase()) : 'Home';
+}
+
+function durationLabel(seconds: number) {
+  if (!seconds) return '—';
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return minutes ? `${minutes}m ${remainder}s` : `${remainder}s`;
+}
+
 function ActivityFeed({ feed, loading }: { feed: JourneyFeed | null; loading: boolean }) {
   const sessions = feed?.sessions ?? [];
+  const summary = feed?.summary;
   return <>
     <View style={styles.heading}>
       <View>
@@ -234,6 +248,12 @@ function ActivityFeed({ feed, loading }: { feed: JourneyFeed | null; loading: bo
         <Text style={styles.subtitle}>Recent buyer and visitor journeys. This refreshes automatically while you are here.</Text>
       </View>
     </View>
+    {summary ? <View style={styles.activitySummary}>
+      <InsightMetric icon="people-outline" label="Unique visitors" value={String(summary.unique_visitors)} note="Tracked visitor sessions" colour="#68ECCB" />
+      <InsightMetric icon="eye-outline" label="Most visited page" value={journeyPageLabel(summary.most_visited_page)} note={summary.most_visited_page_views ? `${summary.most_visited_page_views} page views` : 'No page views yet'} colour="#8FB5FF" />
+      <InsightMetric icon="time-outline" label="Average session" value={durationLabel(summary.average_session_seconds)} note="From first to last tracked step" colour="#F3C76A" />
+      <InsightMetric icon="receipt-outline" label="Paid orders" value={String(summary.paid_orders)} note="Successful customer orders" colour="#FFB6A6" />
+    </View> : null}
     <View style={styles.activityNotice}><Ionicons name="eye-outline" size={20} color="#176E73" /><Text style={styles.activityNoticeText}>We track browsing steps, carts and checkout progress—not addresses, notes, payment details, or search text.</Text></View>
     {loading && !feed ? <ActivityIndicator color="#176E73" style={{ marginVertical: 28 }} /> : null}
     {!loading && !sessions.length ? <View style={styles.activityEmpty}><Ionicons name="pulse-outline" size={32} color="#8A98A8" /><Text style={styles.emptyText}>Activity will appear when customers begin using the buyer app.</Text></View> : null}
@@ -300,6 +320,7 @@ const styles = StyleSheet.create({
   orderList: { gap: 14 }, orderCard: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E0E6EC', borderRadius: 13, padding: 18 }, orderTop: { flexDirection: 'row', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start' }, orderStates: { flexDirection: 'row', gap: 7, alignItems: 'center' }, orderStatus: { color: '#176E73', backgroundColor: '#E1F5EE', borderRadius: 12, paddingHorizontal: 9, paddingVertical: 5, fontSize: 11, fontWeight: '800', textTransform: 'capitalize' }, paymentStatus: { color: '#365B95', backgroundColor: '#E7ECF3', borderRadius: 12, paddingHorizontal: 9, paddingVertical: 5, fontSize: 11, fontWeight: '800', textTransform: 'capitalize' }, orderItems: { color: '#445468', fontSize: 13, lineHeight: 19, marginTop: 14 }, vendorDetails: { marginTop: 14, gap: 8 }, vendorDetail: { borderTopWidth: 1, borderTopColor: '#EDF1F4', paddingTop: 11, flexDirection: 'row', alignItems: 'center', gap: 9 }, vendorDetailIcon: { width: 34, height: 34, borderRadius: 8, backgroundColor: '#E1F5EE', alignItems: 'center', justifyContent: 'center' }, vendorDetailName: { color: '#01193D', fontSize: 14, fontWeight: '800' }, vendorDetailText: { color: '#657283', fontSize: 12, marginTop: 3 }, orderFoot: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#EDF1F4', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, orderLocation: { color: '#657283', fontSize: 12, flex: 1 }, orderTotal: { color: '#176E73', fontSize: 16, fontWeight: '800' },
   dispatchCard: { borderWidth: 1, borderColor: '#E0E6EC', borderRadius: 13, backgroundColor: '#FFFFFF', padding: 18, marginBottom: 14 }, dispatchTop: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, marginBottom: 16 }, dispatchStatus: { color: '#176E73', backgroundColor: '#E1F5EE', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6, fontSize: 12, fontWeight: '800', textTransform: 'capitalize' }, dispatchAssign: { gap: 10 }, riderLabel: { color: '#657283', fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.3 }, riderChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, riderChoice: { minHeight: 38, paddingHorizontal: 11, borderRadius: 8, borderWidth: 1, borderColor: '#BFD8D0', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FFFFFF' }, riderChoiceActive: { backgroundColor: '#E1F5EE', borderColor: '#25B68A' }, riderChoiceText: { color: '#176E73', fontSize: 13, fontWeight: '800' }, riderDirectoryEmpty: { color: '#7B8794', fontSize: 13 }, dispatchForm: { flexDirection: 'row', alignItems: 'center', gap: 9 }, riderInput: { flex: 1, height: 42, borderWidth: 1, borderColor: '#D6DEE6', borderRadius: 8, paddingHorizontal: 11, color: '#01193D', fontSize: 13 }, riderName: { color: '#01193D', fontSize: 14, fontWeight: '800' }, contactButton: { width: 40, height: 40, borderWidth: 1, borderColor: '#BFD8D0', borderRadius: 8, alignItems: 'center', justifyContent: 'center' }, dispatchNote: { color: '#657283', fontSize: 13, lineHeight: 19 },
   activityNotice: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#EAF6F2', borderRadius: 11, padding: 15, marginBottom: 20 },
+  activitySummary: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginBottom: 20 },
   activityNoticeText: { color: '#176E73', fontSize: 13, lineHeight: 19, fontWeight: '600', flex: 1 },
   activityEmpty: { minHeight: 150, justifyContent: 'center', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: '#E0E6EC', borderRadius: 14, backgroundColor: '#FFFFFF', padding: 24 },
   activityList: { gap: 14 },
@@ -311,6 +332,7 @@ const styles = StyleSheet.create({
   activityName: { color: '#01193D', fontSize: 15, fontWeight: '800' },
   activityMeta: { color: '#77828E', fontSize: 12, marginTop: 3 },
   activityState: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 10, backgroundColor: '#F0F3F5', paddingHorizontal: 8, paddingVertical: 5 },
+  activityStateIdle: { backgroundColor: '#F0F3F5' },
   activityStateActive: { backgroundColor: '#E1F5EE' },
   activityStateDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#8A98A8' },
   activityStateDotActive: { backgroundColor: '#25B68A' },
