@@ -37,6 +37,7 @@ export default function BuyerLayout() {
       <Stack.Screen name="payment" />
       <Stack.Screen name="order" />
       <Stack.Screen name="notifications" />
+      <Stack.Screen name="support" />
       <Stack.Screen name="marketplace" />
       <Stack.Screen name="supermarket" />
     </Stack>
