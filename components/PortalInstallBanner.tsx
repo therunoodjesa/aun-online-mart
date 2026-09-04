@@ -47,17 +47,8 @@ export function PortalInstallBanner() {
         if (!subscription || !auth.user) return;
         const payload = subscription.toJSON();
         if (!payload.endpoint || !payload.keys?.p256dh || !payload.keys.auth) return;
-        const { error } = await supabase.from('web_push_subscriptions').upsert({
-          user_id: auth.user.id,
-          endpoint: payload.endpoint,
-          p256dh: payload.keys.p256dh,
-          auth: payload.keys.auth,
-          user_agent: navigator.userAgent,
-          enabled: true,
-          last_error: null,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'endpoint' });
-        if (error) throw error;
+        const { data, error } = await supabase.functions.invoke('portal-push', { body: { action: 'register', subscription: { endpoint: payload.endpoint, p256dh: payload.keys.p256dh, auth: payload.keys.auth, user_agent: navigator.userAgent } } });
+        if (error || data?.error) throw new Error(data?.error ?? error?.message ?? 'Device registration failed.');
         if (active) setAlertStatus('enabled');
       } catch (error) {
         console.warn('Unable to restore portal alerts', error);
@@ -93,11 +84,8 @@ export function PortalInstallBanner() {
       const payload = subscription.toJSON();
       const { data: auth } = await supabase.auth.getUser();
       if (!auth.user || !payload.endpoint || !payload.keys?.p256dh || !payload.keys.auth) throw new Error('Please sign in again before enabling alerts.');
-      const { error } = await supabase.from('web_push_subscriptions').upsert({
-        user_id: auth.user.id, endpoint: payload.endpoint, p256dh: payload.keys.p256dh, auth: payload.keys.auth,
-        user_agent: navigator.userAgent, enabled: true, last_error: null, updated_at: new Date().toISOString(),
-      }, { onConflict: 'endpoint' });
-      if (error) throw error;
+      const { data, error } = await supabase.functions.invoke('portal-push', { body: { action: 'register', subscription: { endpoint: payload.endpoint, p256dh: payload.keys.p256dh, auth: payload.keys.auth, user_agent: navigator.userAgent } } });
+      if (error || data?.error) throw new Error(data?.error ?? error?.message ?? 'Device registration failed.');
       setAlertStatus('enabled');
       await testAlerts();
     } catch (error) {

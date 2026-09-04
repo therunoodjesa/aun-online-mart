@@ -1,7 +1,8 @@
 import * as webpush from 'jsr:@negrel/webpush@^0.5.0';
 import { admin, corsHeaders, getUser, json } from '../_shared/paystack.ts';
 
-type PushRequest = { user_ids?: string[]; title?: string; body?: string; url?: string; tag?: string; test?: boolean };
+type PushSubscription = { endpoint?: string; p256dh?: string; auth?: string; user_agent?: string };
+type PushRequest = { action?: 'register'; subscription?: PushSubscription; user_ids?: string[]; title?: string; body?: string; url?: string; tag?: string; test?: boolean };
 
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -13,7 +14,25 @@ Deno.serve(async (request) => {
     const internalRequest = Boolean(expectedSecret && request.headers.get('X-Internal-Secret') === expectedSecret);
     const user = internalRequest ? null : await getUser(request);
     if (!internalRequest && !user) return json({ error: 'Please sign in before testing device alerts.' }, 401);
-    if (!internalRequest && body.test !== true) return json({ error: 'This endpoint only accepts a personal device-alert test.' }, 403);
+    if (!internalRequest && body.action !== 'register' && body.test !== true) return json({ error: 'This endpoint only accepts device registration or a personal device-alert test.' }, 403);
+    const db = admin();
+    if (body.action === 'register') {
+      if (!user) return json({ error: 'Please sign in again before enabling alerts.' }, 401);
+      const subscription = body.subscription;
+      if (!subscription?.endpoint || !subscription.p256dh || !subscription.auth) return json({ error: 'This browser did not provide a valid device subscription.' }, 400);
+      const { error } = await db.from('web_push_subscriptions').upsert({
+        user_id: user.id,
+        endpoint: subscription.endpoint,
+        p256dh: subscription.p256dh,
+        auth: subscription.auth,
+        user_agent: subscription.user_agent ?? null,
+        enabled: true,
+        last_error: null,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'endpoint' });
+      if (error) throw new Error(error.message);
+      return json({ status: 'registered' });
+    }
     const userIds = internalRequest
       ? [...new Set((body.user_ids ?? []).filter((value): value is string => typeof value === 'string' && value.length > 0))]
       : [user!.id];
@@ -21,7 +40,6 @@ Deno.serve(async (request) => {
     const rawKeys = Deno.env.get('WEB_PUSH_VAPID_KEYS_JSON');
     if (!rawKeys) return json({ status: 'skipped', reason: 'Web Push is not configured.' });
 
-    const db = admin();
     const { data: subscriptions, error } = await db.from('web_push_subscriptions')
       .select('id, endpoint, p256dh, auth')
       .in('user_id', userIds)
