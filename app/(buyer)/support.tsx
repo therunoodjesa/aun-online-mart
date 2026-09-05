@@ -22,11 +22,20 @@ export default function SupportPage() {
   const [feedback, setFeedback] = useState('');
 
   const invoke = async (body: object) => {
-    const { data, error } = await supabase.functions.invoke('support-tickets', { body });
-    // Keep implementation details out of the buyer experience. The team can inspect
-    // technical failures separately, while customers receive a useful next step.
-    if (error || data?.error) throw new Error('We could not complete that request right now. Please check your connection and try again.');
-    return data;
+    const request = body as { action: string; category?: string; subject?: string; message?: string };
+    if (request.action === 'list') {
+      const { data, error } = await supabase.from('support_tickets').select('id, category, subject, message, status, admin_reply, replied_at, created_at').order('updated_at', { ascending: false });
+      if (error) throw error;
+      return { tickets: data ?? [] };
+    }
+    if (request.action === 'create') {
+      const { data: auth } = await supabase.auth.getUser();
+      if (!auth.user) throw new Error('sign in');
+      const { data, error } = await supabase.from('support_tickets').insert({ user_id: auth.user.id, category: request.category, subject: request.subject, message: request.message }).select('id, status, created_at').single();
+      if (error) throw error;
+      return { ticket: data };
+    }
+    throw new Error('request unavailable');
   };
   const loadTickets = useCallback(async () => {
     setLoading(true);

@@ -301,9 +301,14 @@ function SupportInbox() {
 
   const loadTickets = useCallback(async () => {
     setLoading(true); setError('');
-    const { data, error: invokeError } = await supabase.functions.invoke('support-tickets', { body: { action: 'list' } });
-    if (invokeError || data?.error) setError(data?.error || 'Support tickets could not be loaded. Please refresh and try again.');
-    else setTickets(Array.isArray(data?.tickets) ? data.tickets : []);
+    const { data, error: queryError } = await supabase.from('support_tickets').select('id, user_id, category, subject, message, status, admin_reply, created_at, updated_at').order('updated_at', { ascending: false }).limit(200);
+    if (queryError) setError('Support tickets could not be loaded. Please refresh and try again.');
+    else {
+      const userIds = [...new Set((data ?? []).map((ticket) => ticket.user_id))];
+      const { data: profiles } = userIds.length ? await supabase.from('profiles').select('id, full_name, phone').in('id', userIds) : { data: [] };
+      const byId = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
+      setTickets((data ?? []).map((ticket) => ({ ...ticket, customer: byId.get(ticket.user_id) ?? null })) as SupportTicket[]);
+    }
     setLoading(false);
   }, []);
 
@@ -311,8 +316,9 @@ function SupportInbox() {
 
   const updateTicket = async (ticket: SupportTicket, status: SupportTicket['status']) => {
     setWorkingId(ticket.id); setError('');
-    const { data, error: invokeError } = await supabase.functions.invoke('support-tickets', { body: { action: 'update', ticket_id: ticket.id, status, reply: drafts[ticket.id] ?? ticket.admin_reply ?? '' } });
-    if (invokeError || data?.error) setError(data?.error || 'That ticket could not be updated. Please try again.');
+    const reply = drafts[ticket.id] ?? ticket.admin_reply ?? '';
+    const { error: updateError } = await supabase.from('support_tickets').update({ status, admin_reply: reply || null, replied_at: reply ? new Date().toISOString() : null, resolved_at: status === 'resolved' ? new Date().toISOString() : null, updated_at: new Date().toISOString() }).eq('id', ticket.id);
+    if (updateError) setError('That ticket could not be updated. Please try again.');
     else { setDrafts((current) => ({ ...current, [ticket.id]: '' })); await loadTickets(); }
     setWorkingId(null);
   };
