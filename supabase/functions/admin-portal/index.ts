@@ -9,6 +9,7 @@ type AdminRequest =
   | { action: 'update_payout'; payout_id: string; status: 'processing' | 'paid' | 'rejected'; note?: string }
   | { action: 'assign_dispatch'; order_id: string; rider_name: string; rider_phone: string }
   | { action: 'update_dispatch'; order_id: string; status: 'picked_up' | 'delivered' }
+  | { action: 'review_meal_plan'; user_id: string; decision: 'approved' | 'declined' }
   | { action: 'update_home_promo'; promotion: { heading: string; message: string; background_image_url?: string | null; background_color?: string; cta_label: string; cta_href: string } };
 
 async function requireAdmin(request: Request) {
@@ -44,6 +45,19 @@ async function dashboard(db: ReturnType<typeof admin>) {
   if (allOrdersError) throw new Error(allOrdersError.message);
   if (salesOrdersError) throw new Error(salesOrdersError.message);
   if (vendorCountError) throw new Error(vendorCountError.message);
+
+  const [{ count: pendingMealPlanCount, error: mealPlanCountError }, { data: mealPlanRows, error: mealPlanRowsError }] = await Promise.all([
+    db.from('meal_plan_accounts').select('*', { count: 'exact', head: true }).eq('request_status', 'pending'),
+    db.from('meal_plan_accounts').select('user_id, requested_plan_count, updated_at').eq('request_status', 'pending').order('updated_at', { ascending: false }).limit(50),
+  ]);
+  if (mealPlanCountError) throw new Error(mealPlanCountError.message);
+  if (mealPlanRowsError) throw new Error(mealPlanRowsError.message);
+  const mealPlanUserIds = (mealPlanRows ?? []).map((row) => row.user_id);
+  const { data: mealPlanProfiles, error: mealPlanProfilesError } = mealPlanUserIds.length
+    ? await db.from('profiles').select('id, full_name, phone, student_id, age, school_year').in('id', mealPlanUserIds)
+    : { data: [], error: null };
+  if (mealPlanProfilesError) throw new Error(mealPlanProfilesError.message);
+  const mealPlanProfileById = new Map((mealPlanProfiles ?? []).map((profile) => [profile.id, profile]));
 
   const { data: homePromo, error: homePromoError } = await db.from('home_promotions').select('heading, message, background_image_url, background_color, cta_label, cta_href, updated_at').eq('id', true).maybeSingle();
   if (homePromoError) throw new Error(homePromoError.message);
@@ -146,15 +160,27 @@ async function dashboard(db: ReturnType<typeof admin>) {
     .slice(0, 5);
 
   return {
-    metrics: { pending_transfers: pendingTransferCount ?? 0, pending_vendor_applications: pendingVendorCount ?? 0, paid_orders: paidOrderCount ?? 0, pending_payouts: pendingPayoutCount ?? 0, dispatch_queue: dispatchCount ?? 0, gross_sales: grossSales, sales_last_30_days: salesLast30Days, average_order_value: (salesOrders ?? []).length ? Math.round(grossSales / (salesOrders ?? []).length) : 0, partner_vendors: vendorCount ?? 0, top_vendors: topVendors },
+    metrics: { pending_transfers: pendingTransferCount ?? 0, pending_vendor_applications: pendingVendorCount ?? 0, pending_meal_plan_requests: pendingMealPlanCount ?? 0, paid_orders: paidOrderCount ?? 0, pending_payouts: pendingPayoutCount ?? 0, dispatch_queue: dispatchCount ?? 0, gross_sales: grossSales, sales_last_30_days: salesLast30Days, average_order_value: (salesOrders ?? []).length ? Math.round(grossSales / (salesOrders ?? []).length) : 0, partner_vendors: vendorCount ?? 0, top_vendors: topVendors },
     pending_transfers: (intents ?? []).map((intent) => ({ ...intent, delivery_address: [intent.delivery_address, intent.delivery_instructions].filter(Boolean).join(' · ') || null, customer: transferProfileByUserId.get(intent.user_id) ?? { full_name: 'Customer', phone: null }, order: intent.order_id ? orderById.get(intent.order_id) ?? null : null })),
     pending_vendor_applications: applications ?? [],
+    pending_meal_plan_requests: (mealPlanRows ?? []).map((request) => ({ ...request, profile: mealPlanProfileById.get(request.user_id) ?? null })),
     pending_payouts: (payoutRows ?? []).map((payout) => ({ ...payout, vendor: vendorById.get(payout.vendor_id) ?? null })),
     dispatch_queue: (dispatchRows ?? []).map((order) => ({ ...order, delivery_address: [order.delivery_address, order.delivery_instructions].filter(Boolean).join(' · ') || null })),
     delivery_riders: riderRows ?? [],
     orders: adminOrders,
     home_promo: homePromo,
   };
+}
+
+async function reviewMealPlan(db: ReturnType<typeof admin>, userId: string, decision: 'approved' | 'declined') {
+  const { data: request, error: requestError } = await db.from('meal_plan_accounts').select('user_id, requested_plan_count, request_status').eq('user_id', userId).maybeSingle();
+  if (requestError || !request) throw new Error(requestError?.message ?? 'Meal-plan request not found.');
+  if (request.request_status !== 'pending') throw new Error('This meal-plan request has already been reviewed.');
+  const planCount = decision === 'approved' ? Number(request.requested_plan_count ?? 0) : 0;
+  const { error } = await db.from('meal_plan_accounts').update({ plan_count: planCount, request_status: decision, updated_at: new Date().toISOString() }).eq('user_id', userId).eq('request_status', 'pending');
+  if (error) throw new Error(error.message);
+  await db.from('notifications').insert({ user_id: userId, title: decision === 'approved' ? 'Meal plan approved' : 'Meal plan request declined', body: decision === 'approved' ? `Your ${planCount}-credit meal plan is ready to use for eligible cafeteria orders.` : 'Your meal-plan request was not approved. You can review your details and submit a new request.', message: decision === 'approved' ? 'Your meal plan is ready to use.' : 'Please review your meal-plan details and try again if needed.', kind: 'cafeteria', action_label: 'VIEW PROFILE', action_href: '/(buyer)/profile' });
+  return { status: decision, plan_count: planCount };
 }
 
 async function updateHomePromo(db: ReturnType<typeof admin>, promotion: { heading: string; message: string; background_image_url?: string | null; background_color?: string; cta_label: string; cta_href: string }) {
@@ -415,6 +441,7 @@ Deno.serve(async (request) => {
     if (body.action === 'assign_dispatch') return json(await assignDispatch(db, body.order_id, body.rider_name, body.rider_phone));
     if (body.action === 'update_dispatch') return json(await updateDispatch(db, body.order_id, body.status));
     if (body.action === 'update_home_promo') return json(await updateHomePromo(db, body.promotion));
+    if (body.action === 'review_meal_plan') return json(await reviewMealPlan(db, body.user_id, body.decision));
     if (body.action === 'review_vendor') {
       if (!['approved', 'rejected'].includes(body.decision)) return json({ error: 'Choose approve or reject.' }, 400);
       const { error } = await db.from('vendor_applications').update({ status: body.decision, reviewer_note: body.reviewer_note?.trim() || null, reviewed_at: new Date().toISOString() }).eq('id', body.application_id).eq('status', 'pending');
