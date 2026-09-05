@@ -42,7 +42,10 @@ Deno.serve(async (request) => {
       if (error) throw new Error(error.message);
       if (!administrator) return json({ tickets: tickets ?? [], administrator: false });
       const userIds = [...new Set((tickets ?? []).map((ticket) => ticket.user_id))];
-      const { data: profiles, error: profilesError } = userIds.length ? await db.from('profiles').select('id, full_name, phone, email').in('id', userIds) : { data: [], error: null };
+      // Older AOM profile rows do not always have an email field. Support only
+      // needs the customer name and phone, so do not let a missing email block
+      // every ticket from loading.
+      const { data: profiles, error: profilesError } = userIds.length ? await db.from('profiles').select('id, full_name, phone').in('id', userIds) : { data: [], error: null };
       if (profilesError) throw new Error(profilesError.message);
       const profilesById = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
       return json({ tickets: (tickets ?? []).map((ticket) => ({ ...ticket, customer: profilesById.get(ticket.user_id) ?? null })), administrator: true });

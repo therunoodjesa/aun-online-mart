@@ -289,7 +289,7 @@ function ActivityFeed({ feed, loading }: { feed: JourneyFeed | null; loading: bo
 
 type SupportTicket = {
   id: string; category: string; subject: string; message: string; status: 'open' | 'in_progress' | 'resolved'; admin_reply: string | null; created_at: string; updated_at: string;
-  customer?: { full_name?: string | null; phone?: string | null; email?: string | null } | null;
+  customer?: { full_name?: string | null; phone?: string | null } | null;
 };
 
 function SupportInbox() {
@@ -311,7 +311,7 @@ function SupportInbox() {
 
   const updateTicket = async (ticket: SupportTicket, status: SupportTicket['status']) => {
     setWorkingId(ticket.id); setError('');
-    const { data, error: invokeError } = await supabase.functions.invoke('support-tickets', { body: { action: 'update', ticket_id: ticket.id, status, admin_reply: drafts[ticket.id] ?? ticket.admin_reply ?? '' } });
+    const { data, error: invokeError } = await supabase.functions.invoke('support-tickets', { body: { action: 'update', ticket_id: ticket.id, status, reply: drafts[ticket.id] ?? ticket.admin_reply ?? '' } });
     if (invokeError || data?.error) setError(data?.error || 'That ticket could not be updated. Please try again.');
     else { setDrafts((current) => ({ ...current, [ticket.id]: '' })); await loadTickets(); }
     setWorkingId(null);
@@ -326,7 +326,7 @@ function SupportInbox() {
     {!loading && !tickets.length ? <View style={styles.activityEmpty}><Ionicons name="chatbubble-ellipses-outline" size={32} color="#8A98A8" /><Text style={styles.emptyText}>New customer questions will appear here.</Text></View> : null}
     <View style={{ gap: 14 }}>{tickets.map((ticket) => {
       const reply = drafts[ticket.id] ?? ticket.admin_reply ?? '';
-      const customerName = ticket.customer?.full_name?.trim() || ticket.customer?.email || 'Customer';
+      const customerName = ticket.customer?.full_name?.trim() || 'Customer';
       return <View key={ticket.id} style={[styles.panel, { gap: 12, borderLeftWidth: 4, borderLeftColor: ticket.status === 'resolved' ? '#68ECCB' : ticket.status === 'in_progress' ? '#F4A62A' : '#365B95' }]}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}><View style={{ flex: 1 }}><Text style={styles.previewTitle}>{ticket.subject}</Text><Text style={styles.previewSub}>{customerName}{ticket.customer?.phone ? ` · ${ticket.customer.phone}` : ''}</Text><Text style={[styles.previewSub, { marginTop: 4 }]}>{ticket.category.replace('_', ' ')} · {date(ticket.created_at)}</Text></View><View style={[styles.activityState, ticket.status === 'resolved' ? styles.activityStateActive : styles.activityStateIdle]}><Text style={[styles.activityStateText, ticket.status === 'resolved' && styles.activityStateTextActive]}>{ticket.status === 'in_progress' ? 'IN PROGRESS' : ticket.status.toUpperCase()}</Text></View></View>
         <Text style={styles.panelCopy}>{ticket.message}</Text>
