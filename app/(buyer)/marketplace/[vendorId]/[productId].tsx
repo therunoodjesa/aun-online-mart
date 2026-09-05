@@ -10,6 +10,7 @@ import { isFavourited } from '../../../../lib/favourites';
 import { CartToast } from '../../../../components/CartToast';
 import { vendorCanAcceptOrders } from '../../../../lib/vendor-availability';
 import { recordJourneyEvent } from '../../../../lib/journey';
+import { CatalogueRating } from '../../../../components/CatalogueRating';
 
 type Product = { id: string; vendor_id: string; name: string; description: string | null; price: number; category: string | null; image_url: string | null; status: string };
 type ProductOption = { id: string; option_group: string; name: string; price_modifier: number; is_available: boolean; selection_mode?: 'multiple' | 'single' };
@@ -44,14 +45,16 @@ export default function MarketplaceProductPage() {
         const item = data as Product;
         void recordJourneyEvent('product_viewed', `/marketplace/${item.vendor_id}/${item.id}`, { product_id: item.id, product_name: item.name, category: item.category ?? 'marketplace' });
         setProduct(item);
-        const [{ data: vendor }, { data: optionData }, { data: relatedRows }] = await Promise.all([
+        const [{ data: vendor }, { data: optionData }, { data: recommendationIds }] = await Promise.all([
           supabase.from('vendors').select('name').eq('id', item.vendor_id).single(),
           supabase.from('product_options').select('id, option_group, name, price_modifier, is_available, selection_mode').eq('product_id', item.id),
-          supabase.from('products').select('id, vendor_id, name, description, price, category, image_url, status').eq('vendor_id', item.vendor_id).eq('status', 'available').neq('id', item.id).limit(4),
+          supabase.rpc('product_recommendations', { p_product_id: item.id, p_limit: 8 }),
         ]);
         if (vendor?.name) setVendorName(vendor.name);
         if (optionData) setOptions((optionData as ProductOption[]).filter((option) => option.is_available !== false));
-        setRelated((relatedRows ?? []) as Product[]);
+        const ids = (recommendationIds ?? []).map((row: { product_id: string }) => row.product_id);
+        const { data: relatedRows } = ids.length ? await supabase.from('products').select('id, vendor_id, name, description, price, category, image_url, status').in('id', ids) : { data: [] };
+        setRelated(ids.map((id) => (relatedRows ?? []).find((row) => row.id === id)).filter(Boolean) as Product[]);
         setFavourite(await isFavourited('product', item.id).catch(() => false));
       }
       setLoading(false);
@@ -126,7 +129,7 @@ export default function MarketplaceProductPage() {
 
       <View style={styles.details}>
         <Text style={styles.title}>{product.name}</Text>
-        <View style={styles.rating}><Ionicons name="star" size={18} color="#D7B300" /><Text style={styles.ratingNumber}>4.9</Text><Text style={styles.orders}>({orderCount} {orderCount === 1 ? 'order' : 'orders'})</Text></View>
+        <CatalogueRating source="product" productId={product.id} />
         {product.description?.trim() ? <Text style={styles.description}>{product.description}</Text> : null}
 
         {optionGroups.map(([group, choices]) => { const isSingleChoice = choices.some((choice) => choice.selection_mode === 'single'); return <View key={group}><Text style={styles.sectionLabel}>{isSingleChoice ? `CHOOSE ONE ${group.toUpperCase()}` : `CHOOSE ${group.toUpperCase()}`}</Text><View style={styles.optionList}>{choices.map((choice) => { const choiceQuantity = optionQuantities[choice.id] ?? 0; const selected = isSingleChoice ? singleSelections[group] === choice.id : choiceQuantity > 0; return <TouchableOpacity key={choice.id} disabled={!isSingleChoice} onPress={() => isSingleChoice && setSingleSelections((current) => ({ ...current, [group]: choice.id }))} style={[styles.optionRow, selected && styles.optionActive]}><Text style={styles.optionName}>{choice.name}</Text><View style={styles.optionRight}><Text style={styles.optionPrice}>{choice.price_modifier ? `+${price(choice.price_modifier)}` : 'Included'}</Text>{isSingleChoice ? <View style={[styles.radioChoice, selected && styles.radioChoiceActive]}>{selected && <View style={styles.radioChoiceDot} />}</View> : <View style={styles.optionCounter}><TouchableOpacity style={styles.optionCounterButton} onPress={() => changeOptionQuantity(setOptionQuantities, choice.id, -1)}><Ionicons name="remove" size={13} color="#00695A" /></TouchableOpacity><Text style={styles.optionCount}>{choiceQuantity}</Text><TouchableOpacity style={styles.optionCounterButton} onPress={() => changeOptionQuantity(setOptionQuantities, choice.id, 1)}><Ionicons name="add" size={13} color="#00695A" /></TouchableOpacity></View>}</View></TouchableOpacity>; })}</View></View>; })}
