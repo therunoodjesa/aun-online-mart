@@ -147,7 +147,14 @@ export default function BuyerHome() {
   useEffect(() => {
     let active = true;
     const loadVendors = async () => {
-      const { data } = await supabase.from('vendors').select('id, name, category, store_type, average_prep_time, banner_url, is_open').eq('is_approved', true).limit(24);
+      // Do not cap this before availability is applied. A cap here meant that
+      // open stores beyond the first 24 approved vendors could never appear
+      // in the discovery rail, even though customers could find them by search.
+      const { data } = await supabase
+        .from('vendors')
+        .select('id, name, category, store_type, average_prep_time, banner_url, is_open')
+        .eq('is_approved', true)
+        .order('name', { ascending: true });
       const resolved = await applyVendorAvailability((data ?? []) as HomeVendor[]);
       if (!active) return;
       const marketplaceVendors = resolved.filter((vendor) => (vendor.store_type === 'marketplace' || (!vendor.store_type && !isSupermarketVendor(vendor.category))) && vendor.is_open !== false);
