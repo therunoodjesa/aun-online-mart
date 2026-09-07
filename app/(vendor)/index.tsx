@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, PanResponder, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Modal, PanResponder, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
@@ -143,15 +143,22 @@ export default function VendorPortal() {
     const ordered = [...products].sort((a, b) => Number(a.sort_order ?? Number.MAX_SAFE_INTEGER) - Number(b.sort_order ?? Number.MAX_SAFE_INTEGER));
     const from = ordered.findIndex((item) => item.id === product.id);
     if (from < 0) return;
-    const to = Math.max(0, Math.min(ordered.length - 1, from + offset));
+    return moveProductTo(product, from + offset + 1);
+  };
+  const moveProductTo = async (product: Product, targetPosition: number) => {
+    const ordered = [...products].sort((a, b) => Number(a.sort_order ?? Number.MAX_SAFE_INTEGER) - Number(b.sort_order ?? Number.MAX_SAFE_INTEGER));
+    const from = ordered.findIndex((item) => item.id === product.id);
+    if (from < 0) return false;
+    const to = Math.max(0, Math.min(ordered.length - 1, Math.round(targetPosition) - 1));
     if (from === to) return;
     const { data, error } = await supabase.rpc('reorder_vendor_product', {
       p_product_id: product.id,
       p_target_position: to + 1,
     });
-    if (error) { Alert.alert('Placement not changed', friendlyError(error, 'Try dragging the handle again. If this continues, refresh the inventory once and retry.')); return; }
+    if (error) { Alert.alert('Placement not changed', friendlyError(error, 'Try setting a position again. If this continues, refresh the inventory once and retry.')); return false; }
     const positions = new Map(((data ?? []) as Array<{ id: string; sort_order: number }>).map((item) => [item.id, Number(item.sort_order)]));
     setProducts((items) => items.map((item) => positions.has(item.id) ? { ...item, sort_order: positions.get(item.id) ?? item.sort_order } : item));
+    return true;
   };
   const saveSchedule = async () => {
     if (!vendor) return;
@@ -193,7 +200,7 @@ export default function VendorPortal() {
     destructive: true,
     onConfirm: async () => { const { error } = await supabase.auth.signOut(); if (error) { Alert.alert('Still signed in', friendlyError(error, 'Check your connection and try logging out again.')); return; } router.replace('/(auth)/login'); },
   });
-  return <View style={styles.screen}><StatusBar style="light" /><View style={[styles.top, compact && styles.topMobile]}><View style={[styles.brand, compact && { flex: 1, minWidth: 0, gap: 8 }]}><Ionicons name="storefront-outline" size={22} color="#68ECCB" /><View style={{ flexShrink: 1 }}><Text numberOfLines={1} style={styles.storeName}>{vendor?.name ?? 'Your store'}</Text><Text style={styles.portal}>Vendor portal</Text></View></View><View style={[styles.topRight, compact && { gap: 6 }]}><View style={[styles.storeState, compact && { height: 38, paddingHorizontal: 9 }]}><View style={[styles.dot, !vendor?.is_open && styles.dotClosed]} /><Text style={[styles.topText, compact && { fontSize: 12 }]}>Store {vendor?.is_open ? 'open' : 'closed'}</Text></View><View style={[styles.avatar, compact && { width: 36, height: 36, borderRadius: 18 }]}><Text style={styles.avatarText}>{(vendor?.name ?? 'VS').slice(0, 2).toUpperCase()}</Text></View></View></View><View style={[styles.main, compact && styles.mainMobile]}><Sidebar page={page} setPage={setPage} newOrderCount={newOrderCount} compact={compact} /><ScrollView style={styles.workspace} contentContainerStyle={[styles.workspaceContent, compact && styles.workspaceContentMobile]} showsVerticalScrollIndicator><PortalInstallBanner />{loading ? <View style={styles.center}><ActivityIndicator size="large" color="#25B68A" /></View> : portalError && !vendor ? <View style={styles.center}><Ionicons name="alert-circle-outline" size={44} color="#9A5B16" /><Text style={styles.emptyTitle}>Sign-in needed</Text><Text style={styles.emptyCopy}>{portalError}</Text><TouchableOpacity onPress={() => void retrySession()} style={[styles.returnButton, { marginTop: 20 }]}><Text style={styles.returnText}>RETRY</Text></TouchableOpacity></View> : !vendor ? <VendorApplication /> : <>{portalError ? <View style={styles.applicationFeedback}><Ionicons name="alert-circle-outline" size={18} color="#9A5B16" /><Text style={styles.applicationFeedbackText}>{portalError}</Text></View> : null}{page === 'dashboard' ? <Dashboard vendor={vendor} products={products} onOrders={() => setPage('orders')} /> : page === 'orders' ? <Orders vendor={vendor} compact={compact} /> : page === 'analytics' ? <Analytics vendor={vendor} /> : page === 'inventory' ? vendor.store_type === 'service' ? <ServiceCatalogue vendor={vendor} services={services} onChanged={load} setOpen={setOpen} /> : <Inventory compact={compact} vendor={vendor} rows={rows} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} counts={counts} setOpen={setOpen} setStatus={setStatus} setStock={setStock} setStockValue={setStockValue} moveProduct={moveProduct} /> : page === 'availability' ? <Availability vendor={vendor} schedule={schedule} setSchedule={setSchedule} serviceAvailableDates={serviceAvailableDates} setServiceAvailableDates={setServiceAvailableDates} setOpen={setOpen} onSave={saveSchedule} saving={savingSchedule} onPause={pauseStore} onCloseForToday={closeForToday} onMarkAllSoldOut={markAllSoldOut} /> : page === 'payouts' ? <Payouts vendor={vendor} /> : page === 'settings' ? <Settings compact={compact} vendor={vendor} onSaved={(details) => setVendor({ ...vendor, ...details })} onLogOut={logOut} /> : <ComingSoon page={page} />}</>}</ScrollView></View></View>;
+  return <View style={styles.screen}><StatusBar style="light" /><View style={[styles.top, compact && styles.topMobile]}><View style={[styles.brand, compact && { flex: 1, minWidth: 0, gap: 8 }]}><Ionicons name="storefront-outline" size={22} color="#68ECCB" /><View style={{ flexShrink: 1 }}><Text numberOfLines={1} style={styles.storeName}>{vendor?.name ?? 'Your store'}</Text><Text style={styles.portal}>Vendor portal</Text></View></View><View style={[styles.topRight, compact && { gap: 6 }]}><View style={[styles.storeState, compact && { height: 38, paddingHorizontal: 9 }]}><View style={[styles.dot, !vendor?.is_open && styles.dotClosed]} /><Text style={[styles.topText, compact && { fontSize: 12 }]}>Store {vendor?.is_open ? 'open' : 'closed'}</Text></View><View style={[styles.avatar, compact && { width: 36, height: 36, borderRadius: 18 }]}><Text style={styles.avatarText}>{(vendor?.name ?? 'VS').slice(0, 2).toUpperCase()}</Text></View></View></View><View style={[styles.main, compact && styles.mainMobile]}><Sidebar page={page} setPage={setPage} newOrderCount={newOrderCount} compact={compact} /><ScrollView style={styles.workspace} contentContainerStyle={[styles.workspaceContent, compact && styles.workspaceContentMobile]} showsVerticalScrollIndicator><PortalInstallBanner />{loading ? <View style={styles.center}><ActivityIndicator size="large" color="#25B68A" /></View> : portalError && !vendor ? <View style={styles.center}><Ionicons name="alert-circle-outline" size={44} color="#9A5B16" /><Text style={styles.emptyTitle}>Sign-in needed</Text><Text style={styles.emptyCopy}>{portalError}</Text><TouchableOpacity onPress={() => void retrySession()} style={[styles.returnButton, { marginTop: 20 }]}><Text style={styles.returnText}>RETRY</Text></TouchableOpacity></View> : !vendor ? <VendorApplication /> : <>{portalError ? <View style={styles.applicationFeedback}><Ionicons name="alert-circle-outline" size={18} color="#9A5B16" /><Text style={styles.applicationFeedbackText}>{portalError}</Text></View> : null}{page === 'dashboard' ? <Dashboard vendor={vendor} products={products} onOrders={() => setPage('orders')} /> : page === 'orders' ? <Orders vendor={vendor} compact={compact} /> : page === 'analytics' ? <Analytics vendor={vendor} /> : page === 'inventory' ? vendor.store_type === 'service' ? <ServiceCatalogue vendor={vendor} services={services} onChanged={load} setOpen={setOpen} /> : <Inventory compact={compact} vendor={vendor} rows={rows} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} counts={counts} setOpen={setOpen} setStatus={setStatus} setStock={setStock} setStockValue={setStockValue} moveProduct={moveProduct} moveProductTo={moveProductTo} totalProducts={products.length} /> : page === 'availability' ? <Availability vendor={vendor} schedule={schedule} setSchedule={setSchedule} serviceAvailableDates={serviceAvailableDates} setServiceAvailableDates={setServiceAvailableDates} setOpen={setOpen} onSave={saveSchedule} saving={savingSchedule} onPause={pauseStore} onCloseForToday={closeForToday} onMarkAllSoldOut={markAllSoldOut} /> : page === 'payouts' ? <Payouts vendor={vendor} /> : page === 'settings' ? <Settings compact={compact} vendor={vendor} onSaved={(details) => setVendor({ ...vendor, ...details })} onLogOut={logOut} /> : <ComingSoon page={page} />}</>}</ScrollView></View></View>;
 }
 
 function Sidebar({ page, setPage, newOrderCount, compact }: { page: Page; setPage: (page: Page) => void; newOrderCount: number; compact?: boolean }) {
@@ -209,11 +216,13 @@ function Sidebar({ page, setPage, newOrderCount, compact }: { page: Page; setPag
   if (compact) return <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.mobileNavBar} contentContainerStyle={styles.mobileNavContent}>{items.filter((item) => mobilePages.includes(item.id)).map((item) => <TouchableOpacity key={item.id} style={[styles.mobileNav, page === item.id && styles.mobileNavActive]} onPress={() => setPage(item.id)}><Ionicons name={item.icon} size={18} color={page === item.id ? '#176E73' : '#607080'} /><Text style={[styles.mobileNavText, page === item.id && styles.navTextActive]}>{item.label}</Text>{item.id === 'orders' && newOrderCount > 0 ? <View style={styles.mobileOrdersDot} /> : null}</TouchableOpacity>)}</ScrollView>;
   return <View style={styles.sidebar}><Text style={styles.menu}>MENU</Text>{items.map((item) => <TouchableOpacity key={item.id} style={[styles.nav, page === item.id && styles.navActive]} onPress={() => setPage(item.id)}><Ionicons name={item.icon} size={19} color={page === item.id ? '#176E73' : '#7D7D7D'} /><Text style={[styles.navText, page === item.id && styles.navTextActive]}>{item.label}</Text>{item.id === 'orders' && newOrderCount > 0 ? <View style={styles.ordersDot} /> : null}</TouchableOpacity>)}</View>;
 }
-function Inventory({ compact, vendor, rows, search, setSearch, filter, setFilter, counts, setOpen, setStatus, setStock, setStockValue, moveProduct }: { compact?: boolean; vendor: Vendor; rows: Product[]; search: string; setSearch: (value: string) => void; filter: 'all' | Product['status']; setFilter: (value: 'all' | Product['status']) => void; counts: Record<'all' | Product['status'], number>; setOpen: (value: boolean) => void; setStatus: (item: Product, value: Product['status']) => void; setStock: (item: Product, change: number) => void; setStockValue: (item: Product, value: string) => void; moveProduct: (item: Product, offset: number) => void }) {
+function Inventory({ compact, vendor, rows, search, setSearch, filter, setFilter, counts, setOpen, setStatus, setStock, setStockValue, moveProduct, moveProductTo, totalProducts }: { compact?: boolean; vendor: Vendor; rows: Product[]; search: string; setSearch: (value: string) => void; filter: 'all' | Product['status']; setFilter: (value: 'all' | Product['status']) => void; counts: Record<'all' | Product['status'], number>; setOpen: (value: boolean) => void; setStatus: (item: Product, value: Product['status']) => void; setStock: (item: Product, change: number) => void; setStockValue: (item: Product, value: string) => void; moveProduct: (item: Product, offset: number) => void; moveProductTo: (item: Product, position: number) => Promise<boolean | undefined>; totalProducts: number }) {
   const tabs: { id: 'all' | Product['status']; label: string }[] = [{ id: 'all', label: 'All items' }, { id: 'available', label: 'Available' }, { id: 'sold_out', label: 'Sold out' }, { id: 'hidden', label: 'Hidden' }];
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
   const [sortBy, setSortBy] = useState<'placement' | 'name' | 'price_low' | 'price_high' | 'stock_low'>('placement');
+  const [reorderProduct, setReorderProduct] = useState<Product | null>(null);
+  const [targetPosition, setTargetPosition] = useState('');
   const sortedRows = useMemo(() => [...rows].sort((a, b) => {
     if (sortBy === 'name') return a.name.localeCompare(b.name);
     if (sortBy === 'price_low') return Number(a.price) - Number(b.price);
@@ -233,7 +242,7 @@ function Inventory({ compact, vendor, rows, search, setSearch, filter, setFilter
       data={sortedRows}
       keyExtractor={(item) => item.id}
       renderItem={({ item }) => <View style={styles.row}>
-        <PlacementHandle item={item} onMove={moveProduct} />
+        <PlacementHandle item={item} onMove={moveProduct} onOpen={() => { setReorderProduct(item); setTargetPosition(''); }} />
         <View style={styles.itemIcon}><Ionicons name="restaurant-outline" size={20} color="#68ECCB" /></View>
         <View style={inventoryStyles.itemColumn}><Text style={styles.itemName}>{item.name}</Text><Text style={styles.itemSub}>{item.category ?? 'Menu item'}</Text></View>
         <Text style={styles.price}>{'₦' + item.price.toLocaleString('en-NG')}</Text>
@@ -254,6 +263,7 @@ function Inventory({ compact, vendor, rows, search, setSearch, filter, setFilter
       ListEmptyComponent={<Text style={styles.none}>No menu items match this view.</Text>}
     />
     </>}
+    <Modal transparent visible={Boolean(reorderProduct)} animationType="fade" onRequestClose={() => setReorderProduct(null)}><View style={inventoryStyles.reorderBackdrop}><View style={inventoryStyles.reorderCard}><Text style={inventoryStyles.reorderTitle}>Set product position</Text><Text style={inventoryStyles.reorderCopy}>{reorderProduct?.name} can be placed anywhere from 1 to {totalProducts}. Position 1 appears first to customers.</Text><TextInput autoFocus value={targetPosition} onChangeText={setTargetPosition} keyboardType="number-pad" placeholder={`1–${totalProducts}`} placeholderTextColor="#8796A3" style={inventoryStyles.positionInput} /><View style={inventoryStyles.reorderActions}><TouchableOpacity onPress={() => setReorderProduct(null)} style={inventoryStyles.reorderCancel}><Text style={inventoryStyles.reorderCancelText}>Cancel</Text></TouchableOpacity><TouchableOpacity onPress={() => { const position = Math.round(Number(targetPosition)); if (!reorderProduct || !Number.isFinite(position) || position < 1 || position > totalProducts) { Alert.alert('Enter a valid position', `Choose a number from 1 to ${totalProducts}.`); return; } void moveProductTo(reorderProduct, position).then((saved) => { if (!saved) return; setSortBy('placement'); setSearch(''); setFilter('all'); setReorderProduct(null); }); }} style={inventoryStyles.reorderSave}><Text style={inventoryStyles.reorderSaveText}>Move item</Text></TouchableOpacity></View></View></View></Modal>
   </>;
 }
 
@@ -285,7 +295,7 @@ function ServiceDateAvailability({ dates, onChange }: { dates: string[]; onChang
 }
 function Head({ title, subtitle, actions, save, onSave, saving }: { title: string; subtitle: string; actions?: boolean; save?: boolean; onSave?: () => void; saving?: boolean }) { const router = useRouter(); return <View style={styles.head}><View><Text style={styles.title}>{title}</Text><Text style={styles.subtitle}>{subtitle}</Text></View>{actions ? <View style={styles.headButtons}><Button icon="download-outline" label="Import" /><Button icon="add" label="Add item" onPress={() => router.push('/vendor-portal/item/new')} /></View> : save ? <Button icon="save-outline" label={saving ? 'Saving…' : 'Save schedule'} onPress={onSave} /> : null}</View>; }
 function StoreNotice({ vendor, setOpen }: { vendor: Vendor; setOpen: (value: boolean) => void }) { return <View style={[styles.notice, !vendor.is_open && styles.noticeClosed]}><Ionicons name="storefront-outline" size={23} color="#176E73" /><View style={{ flex: 1 }}><Text style={styles.noticeTitle}>Store is {vendor.is_open ? 'accepting' : 'not accepting'} orders</Text><Text style={styles.noticeText}>{vendor.is_open ? 'Students can browse and order from your menu right now.' : 'Toggle to reopen instantly.'}</Text></View><Text style={styles.openText}>{vendor.is_open ? 'Open' : 'Closed'}</Text><Switch value={Boolean(vendor.is_open)} onValueChange={setOpen} trackColor={{ false: '#D9C180', true: '#9AE4D1' }} thumbColor="#FFFFFF" /></View>; }
-function PlacementHandle({ item, onMove }: { item: Product; onMove: (item: Product, offset: number) => void }) {
+function PlacementHandle({ item, onMove, onOpen }: { item: Product; onMove: (item: Product, offset: number) => void; onOpen?: () => void }) {
   const responder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dy) > 3,
@@ -293,9 +303,10 @@ function PlacementHandle({ item, onMove }: { item: Product; onMove: (item: Produ
       // One row is roughly 76px on desktop. A longer swipe therefore moves an
       // item several places, rather than making the vendor repeat one-step moves.
       if (Math.abs(gesture.dy) > 20) onMove(item, Math.sign(gesture.dy) * Math.max(1, Math.round(Math.abs(gesture.dy) / 76)));
+      else onOpen?.();
     },
-  }), [item, onMove]);
-  return <View {...responder.panHandlers} style={inventoryStyles.placementHandle} accessibilityLabel={`Drag ${item.name} to change its placement`}><View style={inventoryStyles.handleLong} /><View style={inventoryStyles.handleShort} /></View>;
+  }), [item, onMove, onOpen]);
+  return <View {...responder.panHandlers} style={inventoryStyles.placementHandle} accessibilityLabel={`Reorder ${item.name}`}><View style={inventoryStyles.handleLong} /><View style={inventoryStyles.handleShort} /></View>;
 }
 
 function Button({ icon, label, onPress }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress?: () => void }) { return <TouchableOpacity onPress={onPress} style={styles.button}><Ionicons name={icon} size={18} color="#242424" /><Text style={styles.buttonText}>{label}</Text></TouchableOpacity>; }
@@ -572,6 +583,16 @@ const inventoryStyles = StyleSheet.create({
   placementHandle: { width: 34, height: 48, alignItems: 'center', justifyContent: 'center', gap: 5, cursor: 'grab' as any },
   handleLong: { width: 18, height: 2, borderRadius: 1, backgroundColor: '#176E73' },
   handleShort: { width: 12, height: 2, borderRadius: 1, backgroundColor: '#176E73' },
+  reorderBackdrop: { flex: 1, backgroundColor: 'rgba(1,25,61,0.46)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  reorderCard: { width: '100%', maxWidth: 410, borderRadius: 16, padding: 24, backgroundColor: '#FFFFFF' },
+  reorderTitle: { color: '#01193D', fontSize: 21, fontWeight: '800' },
+  reorderCopy: { color: '#627083', fontSize: 14, lineHeight: 20, marginTop: 8 },
+  positionInput: { minHeight: 48, borderRadius: 9, borderWidth: 1, borderColor: '#BFD8D0', marginTop: 20, paddingHorizontal: 13, color: '#01193D', fontSize: 16, fontWeight: '700' },
+  reorderActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 9, marginTop: 20 },
+  reorderCancel: { minHeight: 44, borderRadius: 9, borderWidth: 1, borderColor: '#CCD5DC', paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
+  reorderCancelText: { color: '#526273', fontSize: 13, fontWeight: '800' },
+  reorderSave: { minHeight: 44, borderRadius: 9, backgroundColor: '#68ECCB', paddingHorizontal: 17, alignItems: 'center', justifyContent: 'center' },
+  reorderSaveText: { color: '#01193D', fontSize: 13, fontWeight: '800' },
   itemColumn: { flex: 2.1 },
   statusColumn: { flex: 1.1, alignItems: 'center', justifyContent: 'center', textAlign: 'center' },
   stockColumn: { flex: 1.15, alignItems: 'center', justifyContent: 'center', textAlign: 'center' },

@@ -98,7 +98,7 @@ const styles = StyleSheet.create({
   card: { minHeight: 247, borderRadius: 20, overflow: 'hidden', backgroundColor: COLORS.navy },
   image: { height: 137, justifyContent: 'flex-end' },
   imageFile: { resizeMode: 'cover' },
-  shade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(1,25,61,0.16)' },
+  shade: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(1,25,61,0.16)' },
   state: { position: 'absolute', zIndex: 1, top: 11, left: 10, minHeight: 26, paddingHorizontal: 8, borderRadius: 13, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#1D9E75' },
   closed: { backgroundColor: '#627086' },
   stateDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.cream },

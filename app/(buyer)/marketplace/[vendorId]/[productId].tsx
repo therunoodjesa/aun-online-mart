@@ -54,7 +54,7 @@ export default function MarketplaceProductPage() {
         if (optionData) setOptions((optionData as ProductOption[]).filter((option) => option.is_available !== false));
         const ids = (recommendationIds ?? []).map((row: { product_id: string }) => row.product_id);
         const { data: relatedRows } = ids.length ? await supabase.from('products').select('id, vendor_id, name, description, price, category, image_url, status').in('id', ids) : { data: [] };
-        setRelated(ids.map((id) => (relatedRows ?? []).find((row) => row.id === id)).filter(Boolean) as Product[]);
+        setRelated(ids.map((id: string) => (relatedRows ?? []).find((row: { id: string }) => row.id === id)).filter(Boolean) as Product[]);
         setFavourite(await isFavourited('product', item.id).catch(() => false));
       }
       setLoading(false);
