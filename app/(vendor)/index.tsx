@@ -150,14 +150,29 @@ export default function VendorPortal() {
     const from = ordered.findIndex((item) => item.id === product.id);
     if (from < 0) return false;
     const to = Math.max(0, Math.min(ordered.length - 1, Math.round(targetPosition) - 1));
-    if (from === to) return;
+    if (from === to) return true;
+    const next = [...ordered];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    const placed = next.map((item, index) => ({ ...item, sort_order: index + 1 }));
+    const applyPlacement = () => setProducts((items) => items.map((item) => placed.find((placedItem) => placedItem.id === item.id) ?? item));
     const { data, error } = await supabase.rpc('reorder_vendor_product', {
       p_product_id: product.id,
       p_target_position: to + 1,
     });
-    if (error) { Alert.alert('Placement not changed', friendlyError(error, 'Try setting a position again. If this continues, refresh the inventory once and retry.')); return false; }
+    if (error) {
+      // Some existing vendor sessions can hold an older database schema cache.
+      // Fall back to the vendor's already-permitted product updates so a manager
+      // is never blocked from changing the customer-facing order.
+      const updates = await Promise.all(placed.filter((item, index) => Number(ordered[index]?.sort_order ?? index + 1) !== item.sort_order).map((item) => supabase.from('products').update({ sort_order: item.sort_order }).eq('id', item.id)));
+      const fallbackError = updates.find((result) => result.error)?.error;
+      if (fallbackError) { Alert.alert('Placement not changed', friendlyError(fallbackError, 'Try setting a position again. If this continues, refresh the inventory once and retry.')); return false; }
+      applyPlacement();
+      return true;
+    }
     const positions = new Map(((data ?? []) as Array<{ id: string; sort_order: number }>).map((item) => [item.id, Number(item.sort_order)]));
-    setProducts((items) => items.map((item) => positions.has(item.id) ? { ...item, sort_order: positions.get(item.id) ?? item.sort_order } : item));
+    if (positions.size) setProducts((items) => items.map((item) => positions.has(item.id) ? { ...item, sort_order: positions.get(item.id) ?? item.sort_order } : item));
+    else applyPlacement();
     return true;
   };
   const saveSchedule = async () => {
