@@ -150,10 +150,13 @@ export default function CafeteriaPortalWorkspace() {
     })));
   }, []);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    // Initial access checks deserve a loading screen. Subsequent saves and
+    // realtime updates should refresh the data without replacing the entire
+    // workspace with a spinner.
+    if (!silent) setLoading(true);
     const { data: auth } = await supabase.auth.getUser();
-    if (!auth.user) { setLoading(false); return; }
+    if (!auth.user) { if (!silent) setLoading(false); return; }
     const [{ data: access }, { data: productRows }, { data: settingRow }] = await Promise.all([
       supabase.from('cafeteria_staff').select('role, is_active').eq('user_id', auth.user.id).maybeSingle(),
       supabase.from('cafeteria_products').select('id, name, description, category, categories, sort_order, price, status, meal_plan_eligible, image_url, stock_quantity').order('sort_order').order('name'),
@@ -163,7 +166,7 @@ export default function CafeteriaPortalWorkspace() {
     setProducts((productRows ?? []) as Product[]);
     setSettings(settingRow ? settingRow as Settings : defaultSettings);
     if (access?.is_active) await loadOrders();
-    setLoading(false);
+    if (!silent) setLoading(false);
   }, [loadOrders]);
 
   useEffect(() => { void load(); }, [load]);
@@ -172,7 +175,7 @@ export default function CafeteriaPortalWorkspace() {
     const channel = supabase.channel('cafeteria-operations-live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cafeteria_order_items' }, () => void loadOrders())
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, () => void loadOrders())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'cafeteria_settings' }, () => void load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cafeteria_settings' }, () => void load({ silent: true }))
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
   }, [load, loadOrders, staff]);
@@ -207,7 +210,7 @@ export default function CafeteriaPortalWorkspace() {
       <ScrollView style={styles.workspace} contentContainerStyle={styles.workspaceContent} showsVerticalScrollIndicator>
         {feedback ? <Feedback text={feedback} onClose={() => setFeedback('')} /> : null}
         {section === 'overview' ? <Overview products={products} orders={orders} settings={settings} setSection={setSection} /> : null}
-        {section === 'menu' ? <Menu products={products} canManage={isManager} onEdit={(product) => { setWorkingId(product?.id ?? 'new'); setEditorOpen(true); }} onChanged={(message) => { setFeedback(message); void load(); }} /> : null}
+        {section === 'menu' ? <Menu products={products} canManage={isManager} onEdit={(product) => { setWorkingId(product?.id ?? 'new'); setEditorOpen(true); }} onChanged={(message) => { setFeedback(message); void load({ silent: true }); }} /> : null}
         {section === 'orders' ? <OrderBoard orders={orders} role={staff.role} workingId={workingId} onUpdate={async (order, status) => {
           setWorkingId(order.id);
           const { error } = await supabase.rpc('update_cafeteria_order_status', { p_order_id: order.id, p_status: status });
@@ -224,7 +227,7 @@ export default function CafeteriaPortalWorkspace() {
         {section === 'settings' ? <AvailabilitySettings value={settings} canManage={isManager} onSaved={(next) => { setSettings(next); setFeedback('Cafeteria availability and customer notice have been saved.'); }} /> : null}
       </ScrollView>
     </View>
-    <ProductEditor visible={editorOpen} productId={workingId === 'new' ? null : workingId} products={products} onClose={() => setEditorOpen(false)} onSaved={() => { setEditorOpen(false); setFeedback(workingId === 'new' ? 'Cafeteria item added.' : 'Cafeteria item updated.'); void load(); }} />
+    <ProductEditor visible={editorOpen} productId={workingId === 'new' ? null : workingId} products={products} onClose={() => setEditorOpen(false)} onSaved={() => { setEditorOpen(false); setFeedback(workingId === 'new' ? 'Cafeteria item added.' : 'Cafeteria item updated.'); void load({ silent: true }); }} />
   </View>;
 }
 
