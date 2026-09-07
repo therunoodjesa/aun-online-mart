@@ -145,14 +145,13 @@ export default function VendorPortal() {
     if (from < 0) return;
     const to = Math.max(0, Math.min(ordered.length - 1, from + offset));
     if (from === to) return;
-    const next = [...ordered];
-    const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved);
-    const placed = next.map((item, index) => ({ ...item, sort_order: index + 1 }));
-    setProducts((items) => items.map((item) => placed.find((placedItem) => placedItem.id === item.id) ?? item));
-    const results = await Promise.all(placed.filter((item, index) => Number(ordered[index]?.sort_order ?? index + 1) !== item.sort_order).map((item) => supabase.from('products').update({ sort_order: item.sort_order }).eq('id', item.id)));
-    const error = results.find((result) => result.error)?.error;
-    if (error) { void load(); Alert.alert('Placement not changed', friendlyError(error, 'Refresh the inventory and drag the item again.')); }
+    const { data, error } = await supabase.rpc('reorder_vendor_product', {
+      p_product_id: product.id,
+      p_target_position: to + 1,
+    });
+    if (error) { Alert.alert('Placement not changed', friendlyError(error, 'Try dragging the handle again. If this continues, refresh the inventory once and retry.')); return; }
+    const positions = new Map(((data ?? []) as Array<{ id: string; sort_order: number }>).map((item) => [item.id, Number(item.sort_order)]));
+    setProducts((items) => items.map((item) => positions.has(item.id) ? { ...item, sort_order: positions.get(item.id) ?? item.sort_order } : item));
   };
   const saveSchedule = async () => {
     if (!vendor) return;
