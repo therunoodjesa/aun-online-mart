@@ -64,15 +64,10 @@ Deno.serve(async (request) => {
     let debitApplied = false;
     try {
       await createOrderItems(db, order.id, priced.lines as StoredLine[]);
-      // Create a regular payment record before releasing the order.  This
-      // keeps wallet-funded cafeteria orders identical to other paid orders
-      // for reporting and prevents a post-payment record failure.
-      const { error: intentError } = await db.from('payment_intents').insert({
-        user_id: user.id, reference, amount_kobo: Math.round(payableTotal * 100), status: 'paid', payment_channel: 'aom_credit', fulfilment,
-        delivery_address: body.address ?? null, delivery_instructions: body.delivery_instructions ?? null, delivery_slot: body.slot ?? null,
-        order_id: order.id, paid_at: new Date().toISOString(), cart: { ...priced, fulfilment, wallet_credit: payableTotal },
-      });
-      if (intentError) throw new Error(intentError.message);
+      // AOM Credit is its own immutable payment ledger, not a Paystack or
+      // bank-transfer attempt. The order and wallet transaction together are
+      // the durable payment record, so this flow deliberately does not write
+      // to payment_intents (whose legacy rules only govern external payments).
       const { error: debitError } = await db.from('aom_wallet_transactions').insert({
         user_id: user.id, amount: -payableTotal, kind: 'order_payment', description: `Used on order ${order.order_number}`, order_id: order.id,
       });
