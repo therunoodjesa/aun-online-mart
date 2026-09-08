@@ -10,6 +10,7 @@ type AdminRequest =
   | { action: 'assign_dispatch'; order_id: string; rider_name: string; rider_phone: string }
   | { action: 'update_dispatch'; order_id: string; status: 'picked_up' | 'delivered' }
   | { action: 'review_meal_plan'; user_id: string; decision: 'approved' | 'declined' }
+  | { action: 'credit_wallet'; user_id: string; amount: number; kind: 'refund_credit' | 'goodwill_credit' | 'promotion_credit'; description: string; order_id?: string }
   | { action: 'update_home_promo'; promotion: { heading: string; message: string; background_image_url?: string | null; background_color?: string; cta_label: string; cta_href: string } };
 
 async function requireAdmin(request: Request) {
@@ -19,6 +20,21 @@ async function requireAdmin(request: Request) {
   const { data: administrator } = await db.from('admin_users').select('user_id').eq('user_id', user.id).maybeSingle();
   if (!administrator) throw new Error('This account does not have administrator access.');
   return { user, db };
+}
+
+async function creditWallet(db: ReturnType<typeof admin>, administratorId: string, request: Extract<AdminRequest, { action: 'credit_wallet' }>) {
+  const amount = Math.round(Number(request.amount) * 100) / 100;
+  const description = request.description.trim();
+  if (!request.user_id || !Number.isFinite(amount) || amount <= 0) throw new Error('Add a valid customer ID and credit amount.');
+  if (!description || description.length > 240) throw new Error('Add a clear reason of up to 240 characters.');
+  const { data: customer, error: customerError } = await db.from('profiles').select('id, full_name').eq('id', request.user_id).maybeSingle();
+  if (customerError || !customer) throw new Error('Customer not found. Check the customer ID and try again.');
+  const { error } = await db.from('aom_wallet_transactions').insert({
+    user_id: customer.id, amount, kind: request.kind, description, order_id: request.order_id?.trim() || null, created_by: administratorId,
+  });
+  if (error) throw new Error(error.message);
+  await db.from('notifications').insert({ user_id: customer.id, title: 'AOM Credit added', body: `₦${amount.toLocaleString('en-NG')} was added to your AOM Credit. ${description}`, message: 'AOM Credit has been added to your account.', kind: 'promotion', action_label: 'VIEW AOM CREDIT', action_href: '/(buyer)/wallet' });
+  return { customer_name: customer.full_name ?? 'Customer', amount };
 }
 
 async function dashboard(db: ReturnType<typeof admin>) {
@@ -432,7 +448,7 @@ Deno.serve(async (request) => {
   if (request.method !== 'POST') return json({ error: 'Method not allowed.' }, 405);
   try {
     const body = await request.json() as AdminRequest;
-    const { db } = await requireAdmin(request);
+    const { db, user } = await requireAdmin(request);
     if (body.action === 'dashboard') return json(await dashboard(db));
     if (body.action === 'activity_feed') return json(await activityFeed(db));
     if (body.action === 'confirm_transfer') return json(await confirmTransfer(db, body.intent_id));
@@ -442,6 +458,7 @@ Deno.serve(async (request) => {
     if (body.action === 'update_dispatch') return json(await updateDispatch(db, body.order_id, body.status));
     if (body.action === 'update_home_promo') return json(await updateHomePromo(db, body.promotion));
     if (body.action === 'review_meal_plan') return json(await reviewMealPlan(db, body.user_id, body.decision));
+    if (body.action === 'credit_wallet') return json(await creditWallet(db, user.id, body));
     if (body.action === 'review_vendor') {
       if (!['approved', 'rejected'].includes(body.decision)) return json({ error: 'Choose approve or reject.' }, 400);
       const { error } = await db.from('vendor_applications').update({ status: body.decision, reviewer_note: body.reviewer_note?.trim() || null, reviewed_at: new Date().toISOString() }).eq('id', body.application_id).eq('status', 'pending');
