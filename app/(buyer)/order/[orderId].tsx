@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -11,6 +11,7 @@ type OrderUpdate = { id: string; message: string; update_type: 'system' | 'vendo
 type TrackingUpdate = OrderUpdate & { pending?: boolean };
 type ReplacementProduct = { id: string; name: string; price: number; image_url?: string | null; category?: string | null };
 type RejectionRequest = { id: string; reason: string; other_reason: string | null; alternative_products: ReplacementProduct[]; selected_product_name: string | null; selected_products?: ReplacementProduct[]; replacement_budget?: number | null; selected_subtotal?: number | null; refund_amount?: number | null; status: 'pending_customer' | 'replacement_selected' | 'cancelled' | 'choosing' };
+type RefundRequest = { destination: 'aom_credit' | 'bank_transfer'; status: 'credited' | 'pending_bank_transfer' | 'paid' | 'rejected'; amount: number };
 
 const DELIVERY_STEPS = [
   ['pending', 'Order received and processing'], ['accepted', 'Vendor has accepted your order'], ['preparing', 'Your order is being prepared'], ['ready', 'Your order is packed and ready'], ['out_for_delivery', 'Order has been handed to the rider'], ['delivered', 'Order delivered successfully'],
@@ -36,6 +37,7 @@ export default function OrderDetailsPage() {
   const [order, setOrder] = useState<OrderRecord | null>(null);
   const [customUpdates, setCustomUpdates] = useState<OrderUpdate[]>([]);
   const [rejectionRequest, setRejectionRequest] = useState<RejectionRequest | null>(null);
+  const [refundRequest, setRefundRequest] = useState<RefundRequest | null>(null);
   const [selectedReplacementIds, setSelectedReplacementIds] = useState<string[]>([]);
   const [responding, setResponding] = useState(false);
   const [loading, setLoading] = useState(orderId !== 'preview');
@@ -58,6 +60,7 @@ export default function OrderDetailsPage() {
       setCustomUpdates((data.updates ?? []) as OrderUpdate[]);
       const nextRequest = (data.rejection ?? null) as RejectionRequest | null;
       setRejectionRequest(nextRequest?.status === 'pending_customer' ? { ...nextRequest, status: 'choosing' } : nextRequest);
+      setRefundRequest((data.refund ?? null) as RefundRequest | null);
       if (nextRequest?.status === 'pending_customer') setSelectedReplacementIds([]);
       setLoading(false);
     };
@@ -120,11 +123,28 @@ export default function OrderDetailsPage() {
       {rejectionRequest?.status === 'choosing' ? <ReplacementChooser request={rejectionRequest} selectedIds={selectedReplacementIds} onToggle={(id) => setSelectedReplacementIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id])} onConfirm={() => void respondToReplacement('select', selectedReplacementIds)} onCancel={() => void respondToReplacement('cancel')} responding={responding} /> : null}
       {rejectionRequest?.status === 'pending_customer' ? <View style={styles.replacementCard}><View style={styles.replacementTop}><Ionicons name="swap-horizontal-outline" size={22} color="#9A6200" /><Text style={styles.replacementTitle}>Choose a replacement</Text></View><Text style={styles.replacementCopy}>{rejectionRequest.reason === 'out_of_stock' ? 'An item in your order is out of stock. Pick another available item from this vendor, or cancel the order.' : rejectionRequest.other_reason || 'The vendor cannot fulfil this order.'}</Text>{rejectionRequest.alternative_products.map((product) => <TouchableOpacity key={product.id} disabled={responding} onPress={() => void respondToReplacement('select', product.id)} style={styles.replacementOption}><View style={{ flex: 1 }}><Text style={styles.replacementName}>{product.name}</Text><Text style={styles.replacementPrice}>₦{Number(product.price).toLocaleString('en-NG')}</Text></View><Ionicons name="arrow-forward-circle" size={25} color="#176E73" /></TouchableOpacity>)}<TouchableOpacity disabled={responding} onPress={() => void respondToReplacement('cancel')} style={styles.cancelReplacement}>{responding ? <ActivityIndicator color="#9D4538" /> : <Text style={styles.cancelReplacementText}>No thanks — cancel and refund manually</Text>}</TouchableOpacity></View> : null}
       {rejectionRequest?.status === 'replacement_selected' ? <View style={styles.replacementSelected}><Ionicons name="checkmark-circle" size={21} color="#176E73" /><Text style={styles.replacementSelectedText}>You selected {rejectionRequest.selected_product_name ?? 'a replacement'}. The vendor has been notified.</Text></View> : null}
-      {rejectionRequest?.status === 'cancelled' ? <View style={styles.replacementCancelled}><Ionicons name="information-circle" size={21} color="#9D4538" /><Text style={styles.replacementCancelledText}>This order was cancelled. AOM will process your refund manually.</Text></View> : null}
+      {order?.status === 'cancelled' ? <RefundChoice orderId={String(orderId)} refund={refundRequest} onSaved={(refund) => setRefundRequest(refund)} /> : null}
       <View style={styles.timeline}>{updates.map((update, index) => <View key={update.id} style={[styles.updateLayer, { top: index * 72, zIndex: 3 - index }]}><View style={[styles.segment, index === 0 && styles.segmentLatest, index === 1 && styles.segmentMiddle, index === 2 && styles.segmentOldest]} /><View style={styles.updateCopy}><Text style={[styles.updateText, index === 0 && !update.pending && styles.updateTextLatest, update.pending && styles.updateTextPending]}>{update.message}</Text>{update.update_type === 'vendor' && <Text style={styles.vendorTag}>Vendor update</Text>}</View></View>)}</View>
       <TouchableOpacity style={styles.homeButton} onPress={() => router.replace('/(buyer)/')}><Text style={styles.homeText}>BACK TO HOME</Text></TouchableOpacity>
     </ScrollView>
   </View></View>;
+}
+
+function RefundChoice({ orderId, refund, onSaved }: { orderId: string; refund: RefundRequest | null; onSaved: (refund: RefundRequest) => void }) {
+  const [destination, setDestination] = useState<'aom_credit' | 'bank_transfer'>('aom_credit');
+  const [bankName, setBankName] = useState('');
+  const [accountName, setAccountName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [saving, setSaving] = useState(false);
+  if (refund) return <View style={styles.refundSaved}><Ionicons name={refund.destination === 'aom_credit' ? 'wallet-outline' : 'card-outline'} size={21} color="#176E73" /><View style={{ flex: 1 }}><Text style={styles.refundSavedTitle}>{refund.destination === 'aom_credit' ? 'Refund added to AOM Credit' : 'Bank refund requested'}</Text><Text style={styles.refundSavedText}>{refund.destination === 'aom_credit' ? `₦${Number(refund.amount).toLocaleString('en-NG')} is ready to use on AOM.` : 'AOM will process your bank refund manually.'}</Text></View></View>;
+  const submit = async () => {
+    setSaving(true);
+    const { data, error } = await supabase.functions.invoke('refund-choice', { body: { order_id: orderId, destination, bank_name: bankName, account_name: accountName, account_number: accountNumber } });
+    setSaving(false);
+    if (error || data?.error) { Alert.alert('Refund choice not saved', friendlyError(data?.error ?? error, 'Check the refund details and try again.')); return; }
+    onSaved({ destination, status: data.status, amount: Number(data.amount ?? 0) });
+  };
+  return <View style={styles.refundCard}><View style={styles.replacementTop}><Ionicons name="wallet-outline" size={22} color="#176E73" /><Text style={[styles.replacementTitle, { color: '#176E73' }]}>Choose your refund</Text></View><Text style={styles.replacementCopy}>Would you like the refund added to AOM Credit right away, or sent manually to your bank account?</Text><View style={styles.refundOptions}><TouchableOpacity onPress={() => setDestination('aom_credit')} style={[styles.refundOption, destination === 'aom_credit' && styles.refundOptionActive]}><Text style={styles.refundOptionTitle}>AOM Credit</Text><Text style={styles.refundOptionText}>Instantly usable on your next order.</Text></TouchableOpacity><TouchableOpacity onPress={() => setDestination('bank_transfer')} style={[styles.refundOption, destination === 'bank_transfer' && styles.refundOptionActive]}><Text style={styles.refundOptionTitle}>Bank refund</Text><Text style={styles.refundOptionText}>Processed manually by AOM.</Text></TouchableOpacity></View>{destination === 'bank_transfer' ? <View style={styles.bankFields}><TextInput value={bankName} onChangeText={setBankName} placeholder="Bank name" placeholderTextColor="#8894A1" style={styles.refundInput} /><TextInput value={accountName} onChangeText={setAccountName} placeholder="Account name" placeholderTextColor="#8894A1" style={styles.refundInput} /><TextInput value={accountNumber} onChangeText={setAccountNumber} placeholder="10-digit account number" keyboardType="number-pad" maxLength={10} placeholderTextColor="#8894A1" style={styles.refundInput} /></View> : null}<TouchableOpacity disabled={saving} onPress={() => void submit()} style={[styles.refundSubmit, saving && { opacity: .65 }]}>{saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.refundSubmitText}>SAVE REFUND CHOICE</Text>}</TouchableOpacity></View>;
 }
 
 function ReplacementChooser({ request, selectedIds, onToggle, onConfirm, onCancel, responding }: { request: RejectionRequest; selectedIds: string[]; onToggle: (id: string) => void; onConfirm: () => void; onCancel: () => void; responding: boolean }) {
@@ -178,6 +198,19 @@ const styles = StyleSheet.create({
   errorCopy: { marginTop: 9, color: '#C7D2E1', fontSize: 15, lineHeight: 22, textAlign: 'center' },
   errorButton: { height: 52, marginTop: 28, paddingHorizontal: 26, borderRadius: 9, backgroundColor: '#68ECCB', alignItems: 'center', justifyContent: 'center' },
   errorButtonText: { color: '#01193D', fontSize: 13, fontWeight: '800' },
+  refundCard: { marginTop: 12, borderRadius: 14, borderWidth: 1, borderColor: '#92DCC7', backgroundColor: '#F0FBF7', padding: 15 },
+  refundOptions: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  refundOption: { flex: 1, minHeight: 82, borderWidth: 1, borderColor: '#D5E0E4', backgroundColor: '#FFFFFF', borderRadius: 10, padding: 10 },
+  refundOptionActive: { borderColor: '#176E73', backgroundColor: '#E1F6F0' },
+  refundOptionTitle: { color: '#01193D', fontSize: 13, fontWeight: '800' },
+  refundOptionText: { color: '#617082', fontSize: 11, lineHeight: 15, marginTop: 4 },
+  bankFields: { gap: 8, marginTop: 10 },
+  refundInput: { minHeight: 44, borderRadius: 8, borderWidth: 1, borderColor: '#CCD8DF', backgroundColor: '#FFFFFF', paddingHorizontal: 11, color: '#01193D', fontSize: 13 },
+  refundSubmit: { minHeight: 45, borderRadius: 9, marginTop: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#01193D' },
+  refundSubmitText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+  refundSaved: { marginTop: 12, borderRadius: 12, padding: 13, backgroundColor: '#E1F6F0', flexDirection: 'row', gap: 9, alignItems: 'center' },
+  refundSavedTitle: { color: '#176E73', fontSize: 14, fontWeight: '800' },
+  refundSavedText: { color: '#176E73', fontSize: 12, lineHeight: 17, marginTop: 2 },
   hero: { alignSelf: 'stretch', width: '100%', height: 180, backgroundColor: '#01193D', borderBottomLeftRadius: 30, borderBottomRightRadius: 30, alignItems: 'center', paddingTop: 54, zIndex: 2, overflow: 'visible' },
   thankYou: { color: '#FFFFFF', fontSize: 32, lineHeight: 38, fontWeight: '800' },
   titleCard: { position: 'absolute', width: '86%', left: '7%', bottom: -27, height: 54, borderRadius: 28, backgroundColor: '#F8F3ED', alignItems: 'center', justifyContent: 'center', elevation: 4, shadowColor: '#01193D', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } },

@@ -24,13 +24,15 @@ Deno.serve(async (request) => {
     if (orderError) throw new Error(orderError.message);
     if (!order) return json({ error: 'This order is not available in this account.' }, 404);
 
-    const [{ data: updates, error: updatesError }, { data: rejection, error: rejectionError }] = await Promise.all([
+    const [{ data: updates, error: updatesError }, { data: rejection, error: rejectionError }, { data: refund, error: refundError }] = await Promise.all([
       db.from('order_updates').select('id, message, update_type, created_at').eq('order_id', order.id).order('created_at', { ascending: false }).limit(6),
       db.from('order_rejection_requests').select('id, reason, other_reason, alternative_products, selected_product_name, selected_products, replacement_budget, selected_subtotal, refund_amount, status').eq('order_id', order.id).maybeSingle(),
+      db.from('order_refund_requests').select('destination, status, amount').eq('order_id', order.id).maybeSingle(),
     ]);
     if (updatesError) throw new Error(updatesError.message);
     if (rejectionError) throw new Error(rejectionError.message);
-    return json({ order, updates: updates ?? [], rejection: rejection ?? null });
+    if (refundError) throw new Error(refundError.message);
+    return json({ order, updates: updates ?? [], rejection: rejection ?? null, refund: refund ?? null });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : 'Could not load this order.' }, 400);
   }
