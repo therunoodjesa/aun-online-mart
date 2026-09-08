@@ -258,7 +258,15 @@ export default function PaymentPage() {
       delivery_instructions: directions ?? null, slot: slot ?? null, use_meal_plan: mealPlan === 'true',
     } });
     setWalletPaying(false);
-    if (error || data?.error || !data?.order_id) { setPaymentMessage(friendlyError(data?.error ?? error, 'Your AOM Credit could not be used right now. Your balance has not changed. Please try again.')); return; }
+    if (error || data?.error || !data?.order_id) {
+      let detail = data?.error ?? '';
+      const context = (error as { context?: unknown } | null)?.context;
+      if (!detail && context instanceof Response) {
+        try { detail = ((await context.clone().json()) as { error?: string }).error ?? ''; } catch { /* use the friendly fallback */ }
+      }
+      setPaymentMessage(friendlyError(detail || error, 'Your AOM Credit could not be used right now. Your balance has not changed. Please try again.'));
+      return;
+    }
     setWalletBalance(Number(data.balance ?? Math.max(0, walletBalance - total)));
     clearCart();
     router.replace({ pathname: '/(buyer)/order/[orderId]', params: { orderId: data.order_id, fulfilment: isPickup ? 'pickup' : 'delivery', address: address ?? '' } });

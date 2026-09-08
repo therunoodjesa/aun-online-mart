@@ -57,22 +57,34 @@ Deno.serve(async (request) => {
       delivery_address: body.address ?? null, delivery_instructions: body.delivery_instructions ?? null, delivery_slot: body.slot ?? null,
     }).select('id, order_number').single();
     if (orderError || !order) throw new Error(orderError?.message ?? 'Could not create your AOM Credit order.');
+    let debitApplied = false;
     try {
       await createOrderItems(db, order.id, priced.lines as StoredLine[]);
       const { error: debitError } = await db.from('aom_wallet_transactions').insert({
         user_id: user.id, amount: -priced.total, kind: 'order_payment', description: `Used on order ${order.order_number}`, order_id: order.id,
       });
       if (debitError) throw new Error(debitError.message);
+      debitApplied = true;
       const { error: paidError } = await db.from('orders').update({ payment_status: 'paid' }).eq('id', order.id).eq('payment_status', 'pending');
       if (paidError) throw new Error(paidError.message);
       const { error: intentError } = await db.from('payment_intents').insert({
-        user_id: user.id, reference, amount_kobo: 0, status: 'paid', payment_channel: 'aom_credit', fulfilment,
+        // payment_intents requires a positive invoice amount. This records the
+        // full order value; `wallet_credit_applied` shows its funding source.
+        user_id: user.id, reference, amount_kobo: Math.round(priced.total * 100), status: 'paid', payment_channel: 'aom_credit', fulfilment,
         delivery_address: body.address ?? null, delivery_instructions: body.delivery_instructions ?? null, delivery_slot: body.slot ?? null,
         order_id: order.id, paid_at: new Date().toISOString(), cart: { ...priced, fulfilment, wallet_credit: priced.total },
       });
       if (intentError) throw new Error(intentError.message);
       await db.from('order_updates').insert({ order_id: order.id, message: 'Paid with AOM Credit — your order is now being processed', update_type: 'system' });
     } catch (error) {
+      // The ledger is intentionally immutable. If anything after the debit
+      // fails, append an equal reversal before exposing the failure to buyers.
+      if (debitApplied) {
+        const { error: reversalError } = await db.from('aom_wallet_transactions').insert({
+          user_id: user.id, amount: priced.total, kind: 'reversal', description: `Reversal for an incomplete AOM Credit order ${order.order_number}`, order_id: order.id,
+        });
+        if (reversalError) console.error('Could not reverse incomplete wallet order', reversalError);
+      }
       await db.from('orders').update({ status: 'cancelled', payment_status: 'failed' }).eq('id', order.id);
       throw error;
     }
