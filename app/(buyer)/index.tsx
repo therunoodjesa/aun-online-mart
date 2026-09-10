@@ -165,7 +165,10 @@ export default function BuyerHome() {
       const resolved = await applyVendorAvailability((data ?? []) as HomeVendor[]);
       if (!active) return;
       const marketplaceVendors = resolved.filter((vendor) => (vendor.store_type === 'marketplace' || (!vendor.store_type && !isSupermarketVendor(vendor.category))) && vendor.is_open !== false);
-      const supermarketRows = resolved.filter((vendor) => vendor.store_type === 'supermarket' || (!vendor.store_type && isSupermarketVendor(vendor.category)));
+      // The home store rail is an immediate “shop now” surface. Keep closed
+      // supermarkets out of it, while their individual products remain
+      // discoverable through search and supermarket category pages.
+      const supermarketRows = resolved.filter((vendor) => (vendor.store_type === 'supermarket' || (!vendor.store_type && isSupermarketVendor(vendor.category))) && vendor.is_open !== false);
       setVendors(marketplaceVendors);
       setSupermarketVendors(supermarketRows);
     };
