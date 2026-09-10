@@ -11,6 +11,7 @@ type AdminRequest =
   | { action: 'update_dispatch'; order_id: string; status: 'picked_up' | 'delivered' }
   | { action: 'review_meal_plan'; user_id: string; decision: 'approved' | 'declined' }
   | { action: 'credit_wallet'; user_id: string; amount: number; kind: 'refund_credit' | 'goodwill_credit' | 'promotion_credit'; description: string; order_id?: string }
+  | { action: 'update_home_promos'; promotions: { id?: string; position: number; heading: string; message: string; background_image_url?: string | null; background_color?: string; cta_label: string; cta_href: string }[] }
   | { action: 'update_home_promo'; promotion: { heading: string; message: string; background_image_url?: string | null; background_color?: string; cta_label: string; cta_href: string } };
 
 async function requireAdmin(request: Request) {
@@ -211,6 +212,31 @@ async function updateHomePromo(db: ReturnType<typeof admin>, promotion: { headin
   const { data, error } = await db.from('home_promotions').upsert({ id: true, heading, message, background_image_url: backgroundImage, background_color: backgroundColor, cta_label: ctaLabel, cta_href: ctaHref, updated_at: new Date().toISOString() }).select('heading, message, background_image_url, background_color, cta_label, cta_href, updated_at').single();
   if (error) throw new Error(error.message);
   return { home_promo: data };
+}
+
+async function updateHomePromos(db: ReturnType<typeof admin>, promotions: Extract<AdminRequest, { action: 'update_home_promos' }>['promotions']) {
+  if (!Array.isArray(promotions) || !promotions.length || promotions.length > 3) throw new Error('Save between one and three Today’s Pick cards.');
+  const positions = new Set<number>();
+  const rows = promotions.map((promotion, index) => {
+    const position = Number(promotion.position);
+    const heading = promotion.heading?.trim(); const message = promotion.message?.trim(); const ctaLabel = promotion.cta_label?.trim(); const ctaHref = promotion.cta_href?.trim();
+    if (!Number.isInteger(position) || position < 1 || position > 3 || positions.has(position)) throw new Error('Each card needs a different position.');
+    positions.add(position);
+    if (!heading || !message || !ctaLabel || !ctaHref || heading.length > 70 || message.length > 220 || ctaLabel.length > 32 || ctaHref.length > 500) throw new Error(`Review the details on card ${index + 1}.`);
+    const backgroundColor = /^#[0-9a-fA-F]{6}$/.test(promotion.background_color?.trim() ?? '') ? promotion.background_color!.trim() : '#01193D';
+    return { id: promotion.id || crypto.randomUUID(), position, heading, message, background_image_url: promotion.background_image_url?.trim() || null, background_color: backgroundColor, cta_label: ctaLabel, cta_href: ctaHref, updated_at: new Date().toISOString() };
+  });
+  const { data: existing, error: existingError } = await db.from('home_promotion_cards').select('id');
+  if (existingError) throw new Error(existingError.message);
+  const nextIds = rows.map((row) => row.id);
+  const removedIds = (existing ?? []).map((row) => row.id).filter((id) => !nextIds.includes(id));
+  if (removedIds.length) {
+    const { error } = await db.from('home_promotion_cards').delete().in('id', removedIds);
+    if (error) throw new Error(error.message);
+  }
+  const { data, error } = await db.from('home_promotion_cards').upsert(rows).select('id, position, heading, message, background_image_url, background_color, cta_label, cta_href, updated_at').order('position');
+  if (error) throw new Error(error.message);
+  return { home_promos: data ?? [] };
 }
 
 async function activityFeed(db: ReturnType<typeof admin>) {
@@ -457,6 +483,7 @@ Deno.serve(async (request) => {
     if (body.action === 'assign_dispatch') return json(await assignDispatch(db, body.order_id, body.rider_name, body.rider_phone));
     if (body.action === 'update_dispatch') return json(await updateDispatch(db, body.order_id, body.status));
     if (body.action === 'update_home_promo') return json(await updateHomePromo(db, body.promotion));
+    if (body.action === 'update_home_promos') return json(await updateHomePromos(db, body.promotions));
     if (body.action === 'review_meal_plan') return json(await reviewMealPlan(db, body.user_id, body.decision));
     if (body.action === 'credit_wallet') return json(await creditWallet(db, user.id, body));
     if (body.action === 'review_vendor') {
