@@ -1,6 +1,6 @@
 import { admin, corsHeaders, getUser, json } from '../_shared/paystack.ts';
 
-type ProductOption = { option_group?: string; name?: string; price_modifier?: number; is_available?: boolean; selection_mode?: 'single' | 'multiple' };
+type ProductOption = { option_group?: string; name?: string; price_modifier?: number; color_hex?: string | null; is_available?: boolean; selection_mode?: 'single' | 'multiple' };
 type ServiceOption = { name?: string; price?: number; duration_minutes?: number; is_available?: boolean };
 type ProductPayload = { name?: string; description?: string | null; price?: number; stock_quantity?: number | null; category?: string | null; marketplace_category?: string | null; marketplace_subcategory?: string | null; image_url?: string | null; status?: 'available' | 'sold_out' | 'hidden' };
 type ServicePayload = { name?: string; category?: string; description?: string | null; starting_price?: number; duration_minutes?: number; image_url?: string | null; is_available?: boolean };
@@ -8,6 +8,11 @@ type SaveRequest = { kind?: 'product' | 'service'; id?: string | null; product?:
 
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 const number = (value: unknown) => Number(value);
+const colourHex = (value: unknown) => {
+  const candidate = text(value);
+  if (!candidate) return null;
+  return /^#[0-9A-Fa-f]{6}$/.test(candidate) ? candidate.toUpperCase() : null;
+};
 
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -60,10 +65,12 @@ Deno.serve(async (request) => {
         if (error) throw new Error(error.message);
       }
       const choices = (body.options as ProductOption[] ?? []).filter((option) => text(option.option_group) && text(option.name));
+      const invalidColour = choices.find((choice) => text(choice.color_hex) && !colourHex(choice.color_hex));
+      if (invalidColour) return json({ error: `Use a six-digit colour code such as #E8954A for ${text(invalidColour.name)}.` }, 400);
       const { error: clearChoices } = await db.from('product_options').delete().eq('product_id', productId);
       if (clearChoices) throw new Error(clearChoices.message);
       if (choices.length) {
-        const { error } = await db.from('product_options').insert(choices.map((choice) => ({ product_id: productId, option_group: text(choice.option_group), name: text(choice.name), price_modifier: Number(choice.price_modifier ?? 0) || 0, is_available: choice.is_available !== false, selection_mode: choice.selection_mode === 'single' ? 'single' : 'multiple' })));
+        const { error } = await db.from('product_options').insert(choices.map((choice) => ({ product_id: productId, option_group: text(choice.option_group), name: text(choice.name), price_modifier: Number(choice.price_modifier ?? 0) || 0, color_hex: colourHex(choice.color_hex), is_available: choice.is_available !== false, selection_mode: choice.selection_mode === 'single' ? 'single' : 'multiple' })));
         if (error) throw new Error(error.message);
       }
       return json({ id: productId, message: `${name} was saved to your catalogue.` });

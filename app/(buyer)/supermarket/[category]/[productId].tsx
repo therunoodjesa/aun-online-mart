@@ -15,7 +15,7 @@ const COLORS = { navy: '#01193D', mint: '#68ECCB', cream: '#F8F3ED', white: '#FF
 const FALLBACK_IMAGE = require('../../../../assets/images/home/all-products.png');
 
 type Product = { id: string; vendor_id: string | null; name: string; description: string | null; price: number; image_url: string | null; category: string | null; status: string };
-type ProductOption = { id: string; option_group: string; name: string; price_modifier: number; is_available: boolean };
+type ProductOption = { id: string; option_group: string; name: string; price_modifier: number; color_hex?: string | null; is_available: boolean };
 
 const money = (value: number) => `₦${Number(value || 0).toLocaleString('en-NG')}`;
 const colourValue = (name: string) => {
@@ -48,7 +48,7 @@ export default function SupermarketProductPage() {
       const item = data as Product;
       void recordJourneyEvent('product_viewed', `/supermarket/${category ?? 'all-products'}/${item.id}`, { product_id: item.id, product_name: item.name, category: item.category ?? 'supermarket' });
       const [{ data: optionRows }, { data: relatedRows }] = await Promise.all([
-        supabase.from('product_options').select('id, option_group, name, price_modifier, is_available').eq('product_id', item.id).eq('is_available', true),
+        supabase.from('product_options').select('id, option_group, name, price_modifier, color_hex, is_available').eq('product_id', item.id).eq('is_available', true),
         supabase.from('products').select('id, vendor_id, name, description, price, image_url, category, status').eq('status', 'available').is('marketplace_category', null).eq('category', item.category ?? '').neq('id', item.id).limit(6),
       ]);
       if (!mounted) return;
@@ -106,7 +106,7 @@ export default function SupermarketProductPage() {
       <View style={styles.details}>
         <View style={styles.titleRow}><Text style={styles.name}>{product.name}</Text><Text style={styles.price}>{money(unitPrice)}</Text></View>
         <Text style={styles.category}>{product.category || 'Supermarket item'}</Text>
-        {colourOptions.length > 0 && <View style={styles.colours}><View><Text style={styles.sectionTitle}>COLOUR</Text><Text style={styles.selectedColour}>{selectedOption?.name ?? 'Select a colour'}</Text></View><View style={styles.swatches}>{colourOptions.map((option) => <TouchableOpacity key={option.id} onPress={() => setSelectedColour(option.id)} style={[styles.swatch, { backgroundColor: colourValue(option.name) }, selectedColour === option.id && styles.swatchSelected]} accessibilityLabel={`Select ${option.name}`} />)}</View></View>}
+        {colourOptions.length > 0 && <View style={styles.colours}><View><Text style={styles.sectionTitle}>COLOUR</Text><Text style={styles.selectedColour}>{selectedOption?.name ?? 'Select a colour'}</Text></View><View style={styles.swatches}>{colourOptions.map((option) => <TouchableOpacity key={option.id} onPress={() => setSelectedColour(option.id)} style={[styles.swatch, { backgroundColor: option.color_hex || colourValue(option.name) }, selectedColour === option.id && styles.swatchSelected]} accessibilityLabel={`Select ${option.name}`} />)}</View></View>}
         <View style={styles.divider} />
         <Text style={styles.sectionTitle}>PRODUCT DETAILS</Text>
         {product.description?.trim() ? <Text style={styles.description}>{product.description}</Text> : null}
