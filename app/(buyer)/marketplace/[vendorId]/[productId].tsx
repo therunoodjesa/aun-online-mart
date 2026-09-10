@@ -13,11 +13,21 @@ import { recordJourneyEvent } from '../../../../lib/journey';
 import { CatalogueRating } from '../../../../components/CatalogueRating';
 
 type Product = { id: string; vendor_id: string; name: string; description: string | null; price: number; category: string | null; image_url: string | null; status: string };
-type ProductOption = { id: string; option_group: string; name: string; price_modifier: number; is_available: boolean; selection_mode?: 'multiple' | 'single' };
+type ProductOption = { id: string; option_group: string; name: string; price_modifier: number; color_hex?: string | null; is_available: boolean; selection_mode?: 'multiple' | 'single' };
 type Choice = { id: string; name: string; price: number };
 type QuantityMap = Record<string, number>;
 
 const price = (amount: number) => `₦${amount.toLocaleString('en-NG')}`;
+const isShadeGroup = (group: string) => /colou?r|shade|finish/i.test(group);
+
+function MarketplaceOptionGroups({ groups, singleSelections, setSingleSelections, quantities, changeQuantity }: { groups: [string, ProductOption[]][]; singleSelections: Record<string, string>; setSingleSelections: Dispatch<SetStateAction<Record<string, string>>>; quantities: QuantityMap; changeQuantity: (id: string, amount: number) => void }) {
+  return <>{groups.map(([group, choices]) => {
+    const isSingleChoice = choices.some((choice) => choice.selection_mode === 'single');
+    const showSwatches = isSingleChoice && isShadeGroup(group);
+    if (showSwatches) return <View key={group}><Text style={styles.sectionLabel}>CHOOSE A {group.toUpperCase()}</Text><View style={styles.colourChoices}>{choices.map((choice) => { const selected = singleSelections[group] === choice.id; const swatch = choice.color_hex && /^#[0-9A-Fa-f]{6}$/.test(choice.color_hex) ? choice.color_hex : '#A8B2C1'; return <TouchableOpacity key={choice.id} onPress={() => setSingleSelections((current) => ({ ...current, [group]: choice.id }))} style={styles.colourChoice} accessibilityLabel={`Select ${choice.name}`}><View style={[styles.colourSwatch, { backgroundColor: swatch }, selected && styles.colourSwatchSelected]} /> <Text numberOfLines={1} style={[styles.colourChoiceText, selected && styles.colourChoiceTextSelected]}>{choice.name}</Text>{choice.price_modifier ? <Text style={styles.colourChoicePrice}>+{price(choice.price_modifier)}</Text> : null}</TouchableOpacity>; })}</View></View>;
+    return <View key={group}><Text style={styles.sectionLabel}>{isSingleChoice ? `CHOOSE ONE ${group.toUpperCase()}` : `CHOOSE ${group.toUpperCase()}`}</Text><View style={styles.optionList}>{choices.map((choice) => { const choiceQuantity = quantities[choice.id] ?? 0; const selected = isSingleChoice ? singleSelections[group] === choice.id : choiceQuantity > 0; return <TouchableOpacity key={choice.id} disabled={!isSingleChoice} onPress={() => isSingleChoice && setSingleSelections((current) => ({ ...current, [group]: choice.id }))} style={[styles.optionRow, selected && styles.optionActive]}><Text style={styles.optionName}>{choice.name}</Text><View style={styles.optionRight}><Text style={styles.optionPrice}>{choice.price_modifier ? `+${price(choice.price_modifier)}` : 'Included'}</Text>{isSingleChoice ? <View style={[styles.radioChoice, selected && styles.radioChoiceActive]}>{selected && <View style={styles.radioChoiceDot} />}</View> : <View style={styles.optionCounter}><TouchableOpacity style={styles.optionCounterButton} onPress={() => changeQuantity(choice.id, -1)}><Ionicons name="remove" size={13} color="#00695A" /></TouchableOpacity><Text style={styles.optionCount}>{choiceQuantity}</Text><TouchableOpacity style={styles.optionCounterButton} onPress={() => changeQuantity(choice.id, 1)}><Ionicons name="add" size={13} color="#00695A" /></TouchableOpacity></View>}</View></TouchableOpacity>; })}</View></View>;
+  })}</>;
+}
 
 export default function MarketplaceProductPage() {
   const router = useRouter();
@@ -47,7 +57,7 @@ export default function MarketplaceProductPage() {
         setProduct(item);
         const [{ data: vendor }, { data: optionData }, { data: recommendationIds }] = await Promise.all([
           supabase.from('vendors').select('name').eq('id', item.vendor_id).single(),
-          supabase.from('product_options').select('id, option_group, name, price_modifier, is_available, selection_mode').eq('product_id', item.id),
+          supabase.from('product_options').select('id, option_group, name, price_modifier, color_hex, is_available, selection_mode').eq('product_id', item.id),
           supabase.rpc('product_recommendations', { p_product_id: item.id, p_limit: 8 }),
         ]);
         if (vendor?.name) setVendorName(vendor.name);
@@ -131,9 +141,12 @@ export default function MarketplaceProductPage() {
         <Text style={styles.title}>{product.name}</Text>
         <CatalogueRating source="product" productId={product.id} />
         {product.description?.trim() ? <Text style={styles.description}>{product.description}</Text> : null}
+        {/*
 
         {optionGroups.map(([group, choices]) => { const isSingleChoice = choices.some((choice) => choice.selection_mode === 'single'); return <View key={group}><Text style={styles.sectionLabel}>{isSingleChoice ? `CHOOSE ONE ${group.toUpperCase()}` : `CHOOSE ${group.toUpperCase()}`}</Text><View style={styles.optionList}>{choices.map((choice) => { const choiceQuantity = optionQuantities[choice.id] ?? 0; const selected = isSingleChoice ? singleSelections[group] === choice.id : choiceQuantity > 0; return <TouchableOpacity key={choice.id} disabled={!isSingleChoice} onPress={() => isSingleChoice && setSingleSelections((current) => ({ ...current, [group]: choice.id }))} style={[styles.optionRow, selected && styles.optionActive]}><Text style={styles.optionName}>{choice.name}</Text><View style={styles.optionRight}><Text style={styles.optionPrice}>{choice.price_modifier ? `+${price(choice.price_modifier)}` : 'Included'}</Text>{isSingleChoice ? <View style={[styles.radioChoice, selected && styles.radioChoiceActive]}>{selected && <View style={styles.radioChoiceDot} />}</View> : <View style={styles.optionCounter}><TouchableOpacity style={styles.optionCounterButton} onPress={() => changeOptionQuantity(setOptionQuantities, choice.id, -1)}><Ionicons name="remove" size={13} color="#00695A" /></TouchableOpacity><Text style={styles.optionCount}>{choiceQuantity}</Text><TouchableOpacity style={styles.optionCounterButton} onPress={() => changeOptionQuantity(setOptionQuantities, choice.id, 1)}><Ionicons name="add" size={13} color="#00695A" /></TouchableOpacity></View>}</View></TouchableOpacity>; })}</View></View>; })}
 
+        */}
+        <MarketplaceOptionGroups groups={optionGroups} singleSelections={singleSelections} setSingleSelections={setSingleSelections} quantities={optionQuantities} changeQuantity={(choiceId, amount) => changeOptionQuantity(setOptionQuantities, choiceId, amount)} />
         <Text style={styles.sectionLabel}>SPECIAL INSTRUCTIONS</Text>
         <View style={styles.noteBox}><Ionicons name="pencil" size={17} color="#7E7E7E" /><TextInput value={note} onChangeText={setNote} placeholder="Write any special request for the vendor" placeholderTextColor="#7E7E7E" style={[styles.noteInput, { paddingVertical: 0, textAlignVertical: 'center', includeFontPadding: false }]} /></View>
         {related.length > 0 && <View style={sleek.relatedSection}><Text style={sleek.relatedTitle}>Customers also liked</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={sleek.relatedRow}>{related.map((item) => <TouchableOpacity key={item.id} style={sleek.relatedCard} onPress={() => openRelated(item)}><Image source={item.image_url ? { uri: item.image_url } : undefined} style={sleek.relatedImage} /><Text numberOfLines={1} style={sleek.relatedName}>{item.name}</Text><Text style={sleek.relatedPrice}>{price(item.price)}</Text></TouchableOpacity>)}</ScrollView></View>}
@@ -145,6 +158,13 @@ export default function MarketplaceProductPage() {
 }
 
 const styles = StyleSheet.create({
+  colourChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, paddingVertical: 4 },
+  colourChoice: { width: 58, alignItems: 'center', gap: 5 },
+  colourSwatch: { width: 42, height: 42, borderRadius: 21, borderWidth: 2, borderColor: '#D7DEE8' },
+  colourSwatchSelected: { borderColor: '#01193D', borderWidth: 4, transform: [{ scale: 1.08 }] },
+  colourChoiceText: { width: 68, color: '#526273', fontSize: 11, fontWeight: '700', textAlign: 'center' },
+  colourChoiceTextSelected: { color: '#01193D' },
+  colourChoicePrice: { color: '#176E73', fontSize: 10, fontWeight: '800' },
   heroAction: { width: 44, height: 44, borderRadius: 22 },
   optionCounter: { height: 25, minWidth: 72, borderWidth: 1, borderColor: '#A9B5C4', borderRadius: 13, backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 3 },
   optionCounterButton: { width: 19, height: 19, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#68ECCB' },
