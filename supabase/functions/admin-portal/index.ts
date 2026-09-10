@@ -224,17 +224,16 @@ async function updateHomePromos(db: ReturnType<typeof admin>, promotions: Extrac
     positions.add(position);
     if (!heading || !message || !ctaLabel || !ctaHref || heading.length > 70 || message.length > 220 || ctaLabel.length > 32 || ctaHref.length > 500) throw new Error(`Review the details on card ${index + 1}.`);
     const backgroundColor = /^#[0-9a-fA-F]{6}$/.test(promotion.background_color?.trim() ?? '') ? promotion.background_color!.trim() : '#01193D';
-    return { id: promotion.id || crypto.randomUUID(), position, heading, message, background_image_url: promotion.background_image_url?.trim() || null, background_color: backgroundColor, cta_label: ctaLabel, cta_href: ctaHref, updated_at: new Date().toISOString() };
+    return { position, heading, message, background_image_url: promotion.background_image_url?.trim() || null, background_color: backgroundColor, cta_label: ctaLabel, cta_href: ctaHref, updated_at: new Date().toISOString() };
   });
-  const { data: existing, error: existingError } = await db.from('home_promotion_cards').select('id');
+  const { data: existing, error: existingError } = await db.from('home_promotion_cards').select('id, position');
   if (existingError) throw new Error(existingError.message);
-  const nextIds = rows.map((row) => row.id);
-  const removedIds = (existing ?? []).map((row) => row.id).filter((id) => !nextIds.includes(id));
+  const removedIds = (existing ?? []).filter((row) => !positions.has(Number(row.position))).map((row) => row.id);
   if (removedIds.length) {
     const { error } = await db.from('home_promotion_cards').delete().in('id', removedIds);
     if (error) throw new Error(error.message);
   }
-  const { data, error } = await db.from('home_promotion_cards').upsert(rows).select('id, position, heading, message, background_image_url, background_color, cta_label, cta_href, updated_at').order('position');
+  const { data, error } = await db.from('home_promotion_cards').upsert(rows, { onConflict: 'position' }).select('id, position, heading, message, background_image_url, background_color, cta_label, cta_href, updated_at').order('position');
   if (error) throw new Error(error.message);
   return { home_promos: data ?? [] };
 }
