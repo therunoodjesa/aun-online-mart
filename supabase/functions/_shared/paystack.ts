@@ -72,7 +72,7 @@ function cafeteriaHandlingFee(mealPortions: number, snackPlanPortions: number) {
   return mealExtra + snackExtra;
 }
 
-export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delivery' | 'pickup' = 'delivery', deliverySlot: string | null = null, userId: string | null = null, useMealPlan = false) {
+export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delivery' | 'pickup' = 'delivery', deliverySlot: string | null = null, userId: string | null = null, useMealPlan = false, rawPromoCode?: string | null) {
   const normalised = rawItems.map((item) => ({ ...item, productId: String(item.productId) })).filter((item) => item.quantity > 0 && item.quantity <= 25);
   if (!normalised.length) throw new Error('Your cart is empty.');
   if (normalised.some((item) => item.productId.startsWith('service:'))) throw new Error('Service bookings must be checked out separately from products.');
@@ -210,5 +210,25 @@ export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delive
   const deliveryFee = fulfilment === 'pickup' ? 0 : cafeteriaOnly ? 800 : campusDeliveryActive ? campusDeliveryFee : rushHourActive ? rushDeliveryFee : standardDeliveryFee;
   const rushHour = { active: rushHourActive, qualifying_orders: Number(activity?.qualifying_orders ?? 0), threshold: Number(activity?.qualifying_threshold ?? 5), standard_delivery_fee: standardDeliveryFee, discounted_delivery_fee: rushDeliveryFee, savings: rushHourActive ? Math.max(0, standardDeliveryFee - rushDeliveryFee) : 0 };
   const campusDelivery = { active: campusDeliveryActive, fee: campusDeliveryFee, qualifying_vendor_count: campusDeliveryActive ? vendorIds.length : 0 };
-  return { lines, subtotal, serviceFee, packagingFee, mealPlanCredit, deliveryFee, campusDelivery, rushHour, total: subtotal + serviceFee + packagingFee + deliveryFee - mealPlanCredit };
+  const promoCode = typeof rawPromoCode === 'string' ? rawPromoCode.trim().toUpperCase() : '';
+  let promoDiscount = 0;
+  if (promoCode) {
+    const { data: promo, error: promoError } = await db.from('promo_codes')
+      .select('id, code, discount_type, discount_value, minimum_subtotal, maximum_discount, is_active, starts_at, ends_at, usage_limit')
+      .eq('code', promoCode).maybeSingle();
+    if (promoError || !promo || !promo.is_active) throw new Error('That promo code is not available.');
+    const now = Date.now();
+    if ((promo.starts_at && new Date(promo.starts_at).getTime() > now) || (promo.ends_at && new Date(promo.ends_at).getTime() < now)) throw new Error('That promo code is not active at this time.');
+    if (subtotal < Number(promo.minimum_subtotal ?? 0)) throw new Error(`This promo requires a cart subtotal of ₦${Number(promo.minimum_subtotal).toLocaleString('en-NG')}.`);
+    if (promo.usage_limit) {
+      const { count } = await db.from('orders').select('id', { count: 'exact', head: true }).eq('promo_code', promo.code).in('payment_status', ['paid', 'pending']);
+      if ((count ?? 0) >= promo.usage_limit) throw new Error('That promo code has reached its usage limit.');
+    }
+    const rawDiscount = promo.discount_type === 'percentage'
+      ? Math.round(subtotal * (Number(promo.discount_value) / 100) * 100) / 100
+      : Number(promo.discount_value);
+    promoDiscount = Math.max(0, Math.min(subtotal, rawDiscount, promo.maximum_discount == null ? Number.POSITIVE_INFINITY : Number(promo.maximum_discount)));
+  }
+  const total = Math.max(0, subtotal + serviceFee + packagingFee + deliveryFee - mealPlanCredit - promoDiscount);
+  return { lines, subtotal, serviceFee, packagingFee, mealPlanCredit, deliveryFee, campusDelivery, rushHour, promoCode: promoCode || null, promoDiscount, total };
 }

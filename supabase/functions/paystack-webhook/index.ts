@@ -2,7 +2,7 @@ import { admin, corsHeaders, json } from '../_shared/paystack.ts';
 
 const hex = (bytes: ArrayBuffer) => Array.from(new Uint8Array(bytes)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
 type StoredLine = { source?: 'marketplace' | 'cafeteria'; product_id: string | null; cafeteria_product_id?: string | null; product_name: string; unit_price: number; quantity: number; selected_options?: unknown[]; note?: string | null; meal_plan_credit?: number; packaging_fee?: number };
-type StoredCart = { lines?: StoredLine[]; subtotal?: number; total?: number; deliveryFee?: number; rushHour?: { savings?: number } };
+type StoredCart = { lines?: StoredLine[]; subtotal?: number; total?: number; deliveryFee?: number; rushHour?: { savings?: number }; promoCode?: string | null; promoDiscount?: number };
 
 async function ensureOrderItems(db: ReturnType<typeof admin>, orderId: string, lines: StoredLine[]) {
   const marketplaceLines = lines.filter((line) => line.source !== 'cafeteria');
@@ -37,7 +37,7 @@ async function finalisePaidIntent(db: ReturnType<typeof admin>, intent: { id: st
       order_number: `AOM-${String(Date.now()).slice(-7)}`,
       user_id: intent.user_id, status: 'pending', delivery_type: intent.fulfilment,
       payment_status: 'pending', payment_reference: intent.reference, amount_paid: total,
-      subtotal, total, delivery_fee: Number(intent.cart.deliveryFee ?? 0), rush_hour_discount: Number(intent.cart.rushHour?.savings ?? 0), delivery_address: intent.delivery_address, delivery_instructions: intent.delivery_instructions, delivery_slot: intent.delivery_slot,
+      subtotal, total, delivery_fee: Number(intent.cart.deliveryFee ?? 0), rush_hour_discount: Number(intent.cart.rushHour?.savings ?? 0), promo_code: intent.cart.promoCode ?? null, promo_discount: Number(intent.cart.promoDiscount ?? 0), delivery_address: intent.delivery_address, delivery_instructions: intent.delivery_instructions, delivery_slot: intent.delivery_slot,
     }).select('id').single();
     if (error || !order) {
       const { data: duplicate } = await db.from('orders').select('id').eq('payment_reference', intent.reference).maybeSingle();

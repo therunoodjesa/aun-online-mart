@@ -10,7 +10,7 @@ Deno.serve(async (request) => {
     if (body.confirmed !== true) return json({ error: 'Confirm that you completed the bank transfer.' }, 400);
 
     const fulfilment = body.fulfilment === 'pickup' ? 'pickup' : 'delivery';
-    const priced = await priceCart(body.items ?? [], fulfilment, typeof body.slot === 'string' ? body.slot : null, user.id, body.use_meal_plan === true);
+    const priced = await priceCart(body.items ?? [], fulfilment, typeof body.slot === 'string' ? body.slot : null, user.id, body.use_meal_plan === true, body.promo_code);
     const reference = `aom_transfer_${crypto.randomUUID().replaceAll('-', '')}`;
     const orderNumber = `AOM-${String(Date.now()).slice(-7)}`;
     const db = admin();
@@ -28,6 +28,8 @@ Deno.serve(async (request) => {
       payment_status: 'pending', payment_reference: reference, amount_paid: 0,
       subtotal: priced.subtotal,
       total: priced.total,
+      promo_code: priced.promoCode,
+      promo_discount: priced.promoDiscount,
       delivery_fee: priced.deliveryFee,
       rush_hour_discount: priced.rushHour.savings,
       delivery_address: body.address ?? null, delivery_instructions: body.delivery_instructions ?? null, delivery_slot: body.slot ?? null,

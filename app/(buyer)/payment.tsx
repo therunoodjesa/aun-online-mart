@@ -17,7 +17,7 @@ import { friendlyError } from '../../lib/user-error';
 
 type Method = 'paystack' | 'transfer' | 'wallet';
 type PickupLocation = { id: string; name: string; pickup_location: string | null; pickup_instructions: string | null };
-type ServerQuote = { subtotal: number; serviceFee: number; packagingFee?: number; mealPlanCredit?: number; deliveryFee: number; total: number; campusDelivery?: { active?: boolean; fee?: number; qualifying_vendor_count?: number }; rushHour?: { active?: boolean; standard_delivery_fee?: number; discounted_delivery_fee?: number; savings?: number } };
+type ServerQuote = { subtotal: number; serviceFee: number; packagingFee?: number; mealPlanCredit?: number; deliveryFee: number; total: number; promoCode?: string | null; promoDiscount?: number; campusDelivery?: { active?: boolean; fee?: number; qualifying_vendor_count?: number }; rushHour?: { active?: boolean; standard_delivery_fee?: number; discounted_delivery_fee?: number; savings?: number } };
 const PENDING_PAYMENT_REFERENCE = 'aom_pending_paystack_reference';
 const money = (value: number) => `\u20A6${value.toLocaleString('en-NG')}`;
 
@@ -27,7 +27,7 @@ WebBrowser.maybeCompleteAuthSession();
 
 export default function PaymentPage() {
   const router = useRouter();
-  const { address, directions, slot, fulfilment, mealPlan, reference: returnedReference, trxref } = useLocalSearchParams<{ address?: string; directions?: string; slot?: string; fulfilment?: string; mealPlan?: string; reference?: string; trxref?: string }>();
+  const { address, directions, slot, fulfilment, mealPlan, promo, reference: returnedReference, trxref } = useLocalSearchParams<{ address?: string; directions?: string; slot?: string; fulfilment?: string; mealPlan?: string; promo?: string; reference?: string; trxref?: string }>();
   const items = useCartStore((state) => state.items);
   const clearCart = useCartStore((state) => state.clearCart);
   const [method, setMethod] = useState<Method>('transfer');
@@ -143,12 +143,12 @@ export default function PaymentPage() {
       if (!items.length || items.some((item) => item.productId.startsWith('service:'))) { if (active) setServerQuote(null); return; }
       if (active) setServerQuote(null);
       const quoteItems = items.map((item) => ({ productId: item.productId, quantity: item.quantity, selectedOptions: item.selectedOptions?.map((option) => ({ id: option.id, quantity: option.quantity })), note: item.note ?? null }));
-      const { data, error } = await supabase.functions.invoke('checkout-quote', { body: { items: quoteItems, fulfilment: isPickup ? 'pickup' : 'delivery', slot: slot ?? null, use_meal_plan: mealPlan === 'true' } });
+      const { data, error } = await supabase.functions.invoke('checkout-quote', { body: { items: quoteItems, fulfilment: isPickup ? 'pickup' : 'delivery', slot: slot ?? null, use_meal_plan: mealPlan === 'true', promo_code: promo ?? null } });
       if (active) setServerQuote(!error && data?.pricing ? data.pricing as ServerQuote : null);
     };
     void quote();
     return () => { active = false; };
-  }, [items, isPickup, mealPlan, slot]);
+  }, [items, isPickup, mealPlan, slot, promo]);
 
   useEffect(() => {
     const loadPickupLocations = async () => {
@@ -173,7 +173,7 @@ export default function PaymentPage() {
     setReturnedFromCheckout(false);
     await AsyncStorage.removeItem(PENDING_PAYMENT_REFERENCE);
     setPaying(true); setPaymentMessage('');
-    const { data, error } = await supabase.functions.invoke('paystack-initialize', { body: { items: checkoutItems, fulfilment: isPickup ? 'pickup' : 'delivery', address: address ?? null, delivery_instructions: directions ?? null, slot: slot ?? null, callback_url: callbackUrl, use_meal_plan: mealPlan === 'true' } });
+    const { data, error } = await supabase.functions.invoke('paystack-initialize', { body: { items: checkoutItems, fulfilment: isPickup ? 'pickup' : 'delivery', address: address ?? null, delivery_instructions: directions ?? null, slot: slot ?? null, callback_url: callbackUrl, use_meal_plan: mealPlan === 'true', promo_code: promo ?? null } });
     setPaying(false);
     if (error || !data?.authorization_url) { setPaymentMessage(friendlyError(data?.error ?? error, 'Secure checkout did not open. Check your internet connection and tap Pay again. You have not been charged.')); return; }
     if (data.pricing) setServerQuote(data.pricing as ServerQuote);
@@ -233,7 +233,7 @@ export default function PaymentPage() {
         delivery_instructions: directions ?? null,
         slot: slot ?? null,
         confirmed: true,
-        use_meal_plan: mealPlan === 'true',
+        use_meal_plan: mealPlan === 'true', promo_code: promo ?? null,
       },
     });
     setSubmittingTransfer(false);
@@ -255,7 +255,7 @@ export default function PaymentPage() {
     setWalletPaying(true); setPaymentMessage('');
     const { data, error } = await supabase.functions.invoke('wallet-checkout', { body: {
       items: checkoutItems, fulfilment: isPickup ? 'pickup' : 'delivery', address: address ?? null,
-      delivery_instructions: directions ?? null, slot: slot ?? null, use_meal_plan: mealPlan === 'true',
+        delivery_instructions: directions ?? null, slot: slot ?? null, use_meal_plan: mealPlan === 'true', promo_code: promo ?? null,
     } });
     setWalletPaying(false);
     if (error || data?.error || !data?.order_id) {
@@ -327,7 +327,7 @@ export default function PaymentPage() {
       {serverQuote?.campusDelivery?.active ? <View style={{ borderRadius: 10, padding: 13, backgroundColor: '#E1F5EE', flexDirection: 'row', gap: 9, alignItems: 'center' }}><Ionicons name="location-outline" size={20} color="#176E73" /><View style={{ flex: 1 }}><Text style={{ color: '#176E73', fontSize: 15, fontWeight: '800' }}>Campus delivery rate applied</Text><Text style={{ color: '#176E73', fontSize: 13, marginTop: 2 }}>Every store in this order operates on campus, so delivery is a flat {money(deliveryFee)}.</Text></View></View> : null}
       {serverQuote?.rushHour?.active ? <View style={{ borderRadius: 10, padding: 13, backgroundColor: '#E1F5EE', flexDirection: 'row', gap: 9, alignItems: 'center' }}><Ionicons name="flash-outline" size={20} color="#176E73" /><View style={{ flex: 1 }}><Text style={{ color: '#176E73', fontSize: 15, fontWeight: '800' }}>Rush Hour Deal applied</Text><Text style={{ color: '#176E73', fontSize: 13, marginTop: 2 }}>Delivery reduced from {money(Number(serverQuote.rushHour.standard_delivery_fee ?? 2500))} to {money(deliveryFee)} — you save {money(Number(serverQuote.rushHour.savings ?? 0))}.</Text></View></View> : null}
       {serviceFee > 0 && <View style={{ borderRadius: 10, padding: 13, backgroundColor: '#E1F5EE', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}><Text style={{ color: '#175E63', fontSize: 15, fontWeight: '700' }}>AOM service fee (10%, max ₦15,000)</Text><Text style={{ color: '#175E63', fontSize: 16, fontWeight: '800' }}>{money(serviceFee)}</Text></View>}
-      <View style={styles.summary}>{quotePending ? <View style={styles.quoteLoading}><ActivityIndicator color="#176E73" /><Text style={styles.quoteLoadingText}>Calculating your exact total…</Text></View> : <><View style={styles.summaryRow}><Text style={styles.summaryLabel}>Subtotal ({itemCount} items)</Text><Text style={styles.summaryValue}>{money(subtotal)}</Text></View>{packagingFee > 0 && <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Cafeteria handling</Text><Text style={styles.summaryValue}>{money(packagingFee)}</Text></View>}<View style={styles.summaryRow}><Text style={styles.summaryLabel}>Delivery fee</Text><Text style={styles.summaryValue}>{isPickup ? 'Free' : money(deliveryFee)}</Text></View>{mealPlanCredit > 0 && <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Meal-plan credit</Text><Text style={styles.discount}>- {money(mealPlanCredit)}</Text></View>}<View style={styles.totalRow}><Text style={styles.totalLabel}>Total</Text><Text style={styles.total}>{money(total)}</Text></View></>}</View>
+      <View style={styles.summary}>{quotePending ? <View style={styles.quoteLoading}><ActivityIndicator color="#176E73" /><Text style={styles.quoteLoadingText}>Calculating your exact total…</Text></View> : <><View style={styles.summaryRow}><Text style={styles.summaryLabel}>Subtotal ({itemCount} items)</Text><Text style={styles.summaryValue}>{money(subtotal)}</Text></View>{packagingFee > 0 && <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Cafeteria handling</Text><Text style={styles.summaryValue}>{money(packagingFee)}</Text></View>}{serverQuote?.promoDiscount ? <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Promo code ({serverQuote.promoCode})</Text><Text style={styles.discount}>- {money(Number(serverQuote.promoDiscount))}</Text></View> : null}<View style={styles.summaryRow}><Text style={styles.summaryLabel}>Delivery fee</Text><Text style={styles.summaryValue}>{isPickup ? 'Free' : money(deliveryFee)}</Text></View>{mealPlanCredit > 0 && <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Meal-plan credit</Text><Text style={styles.discount}>- {money(mealPlanCredit)}</Text></View>}<View style={styles.totalRow}><Text style={styles.totalLabel}>Total</Text><Text style={styles.total}>{money(total)}</Text></View></>}</View>
       <View style={styles.destination}><View style={styles.destinationIcon}><Ionicons name={isPickup ? 'walk-outline' : 'cube-outline'} size={23} color="#F8F3ED" /></View><View style={styles.destinationCopy}><Text style={styles.destinationLabel}>{isPickup ? 'PICKUP FROM' : 'DELIVERING TO'}</Text><Text style={styles.destinationTitle}>{isPickup ? pickupTitle : address || 'American University of Nigeria'}</Text><Text style={styles.destinationDetail}>{isPickup ? pickupDetail : slot || 'Choose a delivery slot'}</Text></View></View>
       {itemInstructions.length ? <View style={styles.instructions}><View style={styles.instructionsTitleRow}><Ionicons name="pencil-outline" size={18} color="#176E73" /><Text style={styles.instructionsTitle}>SPECIAL INSTRUCTIONS</Text></View>{itemInstructions.map((item) => <View key={item.key} style={styles.instructionRow}><Text style={styles.instructionProduct}>{item.name}</Text><Text style={styles.instructionText}>{item.note}</Text></View>)}</View> : null}
       <View style={styles.methods}><TouchableOpacity style={[styles.method, method === 'transfer' && styles.methodActive]} onPress={() => setMethod('transfer')}><Text style={[styles.methodText, method === 'transfer' && styles.methodTextActive]}>Bank transfer</Text></TouchableOpacity><TouchableOpacity style={[styles.method, method === 'paystack' && styles.methodActive]} onPress={() => setMethod('paystack')}><Text style={[styles.methodText, method === 'paystack' && styles.methodTextActive]}>Paystack</Text></TouchableOpacity><TouchableOpacity disabled={walletLoading || walletBalance < total || quotePending} style={[styles.method, method === 'wallet' && styles.methodActive, (walletLoading || walletBalance < total || quotePending) && styles.methodDisabled]} onPress={() => setMethod('wallet')}><Text style={[styles.methodText, method === 'wallet' && styles.methodTextActive]}>AOM Credit</Text></TouchableOpacity></View>

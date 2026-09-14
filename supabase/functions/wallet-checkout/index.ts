@@ -42,7 +42,7 @@ Deno.serve(async (request) => {
     if (!user) return json({ error: 'Please sign in before using AOM Credit.' }, 401);
     const body = await request.json();
     const fulfilment = body.fulfilment === 'pickup' ? 'pickup' : 'delivery';
-    const priced = await priceCart(body.items ?? [], fulfilment, typeof body.slot === 'string' ? body.slot : null, user.id, body.use_meal_plan === true);
+    const priced = await priceCart(body.items ?? [], fulfilment, typeof body.slot === 'string' ? body.slot : null, user.id, body.use_meal_plan === true, body.promo_code);
     if (priced.total <= 0) throw new Error('This order does not need a payment.');
     const db = admin();
     const { data: account, error: accountError } = await db.from('aom_wallet_accounts').select('balance').eq('user_id', user.id).maybeSingle();
@@ -57,6 +57,7 @@ Deno.serve(async (request) => {
     const { data: order, error: orderError } = await db.from('orders').insert({
       order_number: `AOM-${String(Date.now()).slice(-7)}`, user_id: user.id, status: 'pending', delivery_type: fulfilment,
       payment_status: 'pending', payment_reference: reference, amount_paid: payableTotal, subtotal: priced.subtotal, total: payableTotal,
+      promo_code: priced.promoCode, promo_discount: priced.promoDiscount,
       wallet_credit_applied: payableTotal, delivery_fee: priced.deliveryFee, rush_hour_discount: priced.rushHour.savings,
       delivery_address: body.address ?? null, delivery_instructions: body.delivery_instructions ?? null, delivery_slot: body.slot ?? null,
     }).select('id, order_number').single();

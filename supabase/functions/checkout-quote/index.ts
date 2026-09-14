@@ -7,7 +7,7 @@ Deno.serve(async (request) => {
     if (!user) return json({ error: 'Please sign in to view your checkout price.' }, 401);
     const body = await request.json();
     const fulfilment = body.fulfilment === 'pickup' ? 'pickup' : 'delivery';
-    const pricing = await priceCart(body.items ?? [], fulfilment, typeof body.slot === 'string' ? body.slot : null, user.id, body.use_meal_plan === true);
+    const pricing = await priceCart(body.items ?? [], fulfilment, typeof body.slot === 'string' ? body.slot : null, user.id, body.use_meal_plan === true, body.promo_code);
     return json({ pricing });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : 'Could not calculate this checkout.' }, 400);
