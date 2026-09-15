@@ -214,20 +214,35 @@ export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delive
   let promoDiscount = 0;
   if (promoCode) {
     const { data: promo, error: promoError } = await db.from('promo_codes')
-      .select('id, code, discount_type, discount_value, minimum_subtotal, maximum_discount, is_active, starts_at, ends_at, usage_limit')
+      .select('id, code, discount_type, discount_value, max_discount_amount, minimum_order_amount, applies_to, vendor_id, is_active, starts_at, ends_at, usage_limit, per_customer_limit, first_order_only')
       .eq('code', promoCode).maybeSingle();
     if (promoError || !promo || !promo.is_active) throw new Error('That promo code is not available.');
     const now = Date.now();
     if ((promo.starts_at && new Date(promo.starts_at).getTime() > now) || (promo.ends_at && new Date(promo.ends_at).getTime() < now)) throw new Error('That promo code is not active at this time.');
-    if (subtotal < Number(promo.minimum_subtotal ?? 0)) throw new Error(`This promo requires a cart subtotal of ₦${Number(promo.minimum_subtotal).toLocaleString('en-NG')}.`);
+    const appliesTo = String(promo.applies_to ?? 'all').toLowerCase();
+    const hasMarketplace = regularLines.length > 0;
+    const hasCafeteria = cafeteriaLines.length > 0;
+    if (appliesTo === 'marketplace' && !hasMarketplace) throw new Error('This promo code is for marketplace orders only.');
+    if (appliesTo === 'cafeteria' && !hasCafeteria) throw new Error('This promo code is for cafeteria orders only.');
+    if (promo.vendor_id && !regularLines.some((line) => products.find((product) => product.id === line.product_id)?.vendor_id === promo.vendor_id)) throw new Error('This promo code is not for the stores in your cart.');
+    const minimumOrderAmount = Number(promo.minimum_order_amount ?? 0);
+    if (subtotal < minimumOrderAmount) throw new Error(`This promo requires a cart subtotal of ₦${minimumOrderAmount.toLocaleString('en-NG')}.`);
     if (promo.usage_limit) {
       const { count } = await db.from('orders').select('id', { count: 'exact', head: true }).eq('promo_code', promo.code).in('payment_status', ['paid', 'pending']);
       if ((count ?? 0) >= promo.usage_limit) throw new Error('That promo code has reached its usage limit.');
     }
+    if (userId && promo.per_customer_limit) {
+      const { count } = await db.from('orders').select('id', { count: 'exact', head: true }).eq('promo_code', promo.code).eq('user_id', userId).in('payment_status', ['paid', 'pending']);
+      if ((count ?? 0) >= Number(promo.per_customer_limit)) throw new Error('You have already used this promo code.');
+    }
+    if (userId && promo.first_order_only) {
+      const { count } = await db.from('orders').select('id', { count: 'exact', head: true }).eq('user_id', userId).in('payment_status', ['paid', 'pending']);
+      if ((count ?? 0) > 0) throw new Error('This promo code is only available on a first order.');
+    }
     const rawDiscount = promo.discount_type === 'percentage'
       ? Math.round(subtotal * (Number(promo.discount_value) / 100) * 100) / 100
       : Number(promo.discount_value);
-    promoDiscount = Math.max(0, Math.min(subtotal, rawDiscount, promo.maximum_discount == null ? Number.POSITIVE_INFINITY : Number(promo.maximum_discount)));
+    promoDiscount = Math.max(0, Math.min(subtotal, rawDiscount, promo.max_discount_amount == null ? Number.POSITIVE_INFINITY : Number(promo.max_discount_amount)));
   }
   const total = Math.max(0, subtotal + serviceFee + packagingFee + deliveryFee - mealPlanCredit - promoDiscount);
   return { lines, subtotal, serviceFee, packagingFee, mealPlanCredit, deliveryFee, campusDelivery, rushHour, promoCode: promoCode || null, promoDiscount, total };
