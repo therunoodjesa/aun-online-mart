@@ -197,7 +197,7 @@ export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delive
     && vendorRows?.length === vendorIds.length
     && vendorRows.every((vendor) => vendor.operating_location === 'on_campus');
   const campusDeliveryActive = fulfilment === 'delivery' && allVendorsAreOnCampus;
-  const campusDeliveryFee = 500;
+  const campusDeliveryFee = 800;
   const marketplaceOnly = products.every((product) => Boolean(product.marketplace_category));
   const { data: activityRows } = marketplaceOnly && fulfilment === 'delivery'
     ? await db.rpc('get_marketplace_rush_hour_activity', { p_delivery_slot: deliverySlot })

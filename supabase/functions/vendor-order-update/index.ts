@@ -24,14 +24,14 @@ const rejectionCopy: Record<RejectReason, string> = {
   other: 'The vendor is unable to fulfil this order.',
 };
 
-async function notifyBuyer(db: ReturnType<typeof admin>, order: { id: string; user_id: string }, title: string, message: string, kind: 'order' | 'delivery' | 'booking' = 'order') {
+async function notifyBuyer(db: ReturnType<typeof admin>, order: { id: string; user_id: string }, title: string, message: string, kind: 'order' | 'delivery' | 'booking' = 'order', actionLabel = 'TRACK ORDER') {
   const actionHref = `/(buyer)/order/${order.id}`;
   const { data: existing, error: existingError } = await db.from('notifications').select('id').eq('user_id', order.user_id).eq('action_href', actionHref).eq('message', message).maybeSingle();
   if (existingError) throw new Error(existingError.message);
   if (existing) return existing.id;
   const { data, error } = await db.from('notifications').insert({
     user_id: order.user_id, title, body: message, message, kind,
-    action_label: 'TRACK ORDER', action_href: actionHref, is_read: false,
+    action_label: actionLabel, action_href: actionHref, is_read: false,
   }).select('id').single();
   if (error) throw new Error(error.message);
   return data.id;
@@ -51,7 +51,7 @@ Deno.serve(async (request) => {
     if (vendorError || !vendor) return json({ error: vendorError?.message ?? 'No vendor store is linked to this account.' }, 403);
     const { data: vendorLine, error: lineError } = await db.from('order_items').select('id, products!inner(vendor_id)').eq('order_id', body.order_id).eq('products.vendor_id', vendor.id).limit(1).maybeSingle();
     if (lineError || !vendorLine) return json({ error: lineError?.message ?? 'This order does not belong to your store.' }, 403);
-    const { data: order, error: orderError } = await db.from('orders').select('id, user_id, status').eq('id', body.order_id).maybeSingle();
+    const { data: order, error: orderError } = await db.from('orders').select('id, user_id, status, delivery_type').eq('id', body.order_id).maybeSingle();
     if (orderError || !order) return json({ error: orderError?.message ?? 'Order not found.' }, 404);
 
     if (body.status === 'cancelled') {
@@ -91,7 +91,14 @@ Deno.serve(async (request) => {
       if (statusError) throw new Error(statusError.message);
       const { error: updateError } = await db.from('order_updates').insert({ order_id: order.id, vendor_id: vendor.id, message, update_type: 'vendor' });
       if (updateError) throw new Error(updateError.message);
-      const notificationId = await notifyBuyer(db, order, vendor.store_type === 'service' ? `Booking rejected by ${vendor.name}` : waitingForChoice ? `Choose a replacement from ${vendor.name}` : `Order cancelled by ${vendor.name}`, message, vendor.store_type === 'service' ? 'booking' : 'order');
+      const notificationId = await notifyBuyer(
+        db,
+        order,
+        vendor.store_type === 'service' ? `Booking rejected by ${vendor.name}` : waitingForChoice ? `Choose a replacement from ${vendor.name}` : `Order cancelled by ${vendor.name}`,
+        message,
+        vendor.store_type === 'service' ? 'booking' : 'order',
+        waitingForChoice ? 'CHOOSE REPLACEMENT' : 'VIEW ORDER',
+      );
       await captureServerEvent(user.id, 'vendor_order_status_updated', {
         order_id: order.id,
         status: orderStatus,
