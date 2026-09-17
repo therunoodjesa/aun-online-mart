@@ -127,7 +127,7 @@ export default function Login() {
         {!!loginError && <View style={styles.loginError}><Ionicons name="alert-circle-outline" size={17 * S} color="#FFB4A8" /><Text style={styles.loginErrorText}>{loginError}</Text></View>}
 
         {/* Forgot password */}
-        <TouchableOpacity style={styles.forgotRow}>
+        <TouchableOpacity style={styles.forgotRow} onPress={() => router.push('/(auth)/forgot-password')}>
           <Text style={styles.forgotText}>Forgot password?</Text>
         </TouchableOpacity>
 
