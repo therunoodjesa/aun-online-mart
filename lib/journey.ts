@@ -22,7 +22,7 @@ const getIdentity = async () => {
   return { sessionId, anonymousId };
 };
 
-export const recordJourneyEvent = async (eventName: string, route: string, properties: Record<string, string | number | boolean> = {}) => {
+export const recordJourneyEvent = async (eventName: string, route: string, properties: Record<string, string | number | boolean | undefined> = {}) => {
   try {
     const { sessionId, anonymousId } = await getIdentity();
     await supabase.functions.invoke('journey-track', { body: { session_id: sessionId, anonymous_id: anonymousId, event_name: eventName, route, properties } });
