@@ -279,7 +279,37 @@ function Menu({ products, canManage, onEdit, onChanged }: { products: Product[];
     <PageHead title="Menu & availability" subtitle="Manage items, stock, service periods, customer choices, and buyer-facing placement." action={canManage ? 'Add item' : undefined} onAction={() => onEdit()} />
     <View style={styles.summaryRow}><MiniMetric label="Available" value={products.filter((item) => item.status === 'available').length} /><MiniMetric label="Sold out" value={products.filter((item) => item.status === 'sold_out').length} /><MiniMetric label="Hidden" value={products.filter((item) => item.status === 'hidden').length} /></View>
     <View style={styles.tabs}>{(['all', ...periods] as const).map((value) => <TouchableOpacity key={value} onPress={() => setTab(value)} style={[styles.tab, tab === value && styles.tabActive]}><Text style={[styles.tabText, tab === value && styles.tabTextActive]}>{value === 'all' ? 'All items' : value[0].toUpperCase() + value.slice(1)}</Text></TouchableOpacity>)}</View>
-    <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.tableScroll}><View style={[styles.table, styles.tableWide]}><View style={styles.tableHead}><Text style={[styles.column, { flex: 2.2 }]}>ITEM</Text><Text style={styles.column}>PERIOD</Text><Text style={styles.column}>PRICE</Text><Text style={styles.column}>STOCK</Text><Text style={styles.column}>STATUS</Text>{canManage ? <Text style={[styles.column, { flex: 1.6 }]}>ACTIONS</Text> : null}</View>{visible.map((item) => <View key={item.id} style={styles.tableRow}><View style={[styles.productCell, { flex: 2.2 }]}>{item.image_url ? <Image source={{ uri: item.image_url }} style={styles.productImage} /> : <View style={styles.productFallback}><Ionicons name="restaurant-outline" size={20} color="#68ECCB" /></View>}<View style={{ flex: 1 }}><Text style={styles.rowTitle}>{item.name}</Text><Text style={styles.muted}>{item.meal_plan_eligible ? 'Meal-plan eligible' : 'Cash/card item'}</Text></View></View><Text style={styles.tableText}>{categoriesFor(item).join(' + ')}</Text><Text style={styles.amount}>{money(item.price)}</Text><TextInput editable={canManage} defaultValue={item.stock_quantity == null ? '' : String(item.stock_quantity)} placeholder="Unlimited" placeholderTextColor="#98A2AE" keyboardType="numeric" onEndEditing={(event) => { const raw = event.nativeEvent.text.trim(); void update(item.id, { stock_quantity: raw ? Math.max(0, Number(raw) || 0) : null }, `${item.name} stock saved.`); }} style={styles.stockInput} /><View style={{ flex: 1 }}><StatusPill status={item.status} /></View>{canManage ? <View style={[styles.rowActions, { flex: 1.6 }]}><TouchableOpacity style={styles.iconButton} onPress={() => void move(item, -1)}><Ionicons name="arrow-up" size={17} color="#176E73" /></TouchableOpacity><TouchableOpacity style={styles.iconButton} onPress={() => void move(item, 1)}><Ionicons name="arrow-down" size={17} color="#176E73" /></TouchableOpacity><TouchableOpacity style={styles.iconButton} onPress={() => onEdit(item)}><Ionicons name="pencil-outline" size={17} color="#176E73" /></TouchableOpacity><TouchableOpacity style={styles.iconButton} onPress={() => void update(item.id, { status: item.status === 'available' ? 'sold_out' : 'available' }, `${item.name} is now ${item.status === 'available' ? 'sold out' : 'available'}.`)}><Ionicons name={item.status === 'available' ? 'close-outline' : 'checkmark-outline'} size={18} color="#176E73" /></TouchableOpacity><TouchableOpacity style={styles.iconButton} onPress={() => void update(item.id, { status: item.status === 'hidden' ? 'available' : 'hidden' }, `${item.name} visibility updated.`)}><Ionicons name={item.status === 'hidden' ? 'eye-outline' : 'eye-off-outline'} size={17} color="#176E73" /></TouchableOpacity><TouchableOpacity style={[styles.iconButton, styles.deleteButton]} onPress={() => remove(item)}><Ionicons name="trash-outline" size={17} color="#B44646" /></TouchableOpacity></View> : null}</View>)}{!visible.length ? <Empty icon="restaurant-outline" title="No items here yet" copy="Add the first product for this service period." /> : null}</View></ScrollView>
+    <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.tableScroll}>
+      <View style={[styles.table, styles.tableWide]}>
+        <View style={styles.tableHead}>
+          <Text style={[styles.column, menuTableStyles.itemColumn]}>ITEM</Text>
+          <Text style={[styles.column, menuTableStyles.periodColumn]}>PERIOD</Text>
+          <Text style={[styles.column, menuTableStyles.priceColumn]}>PRICE</Text>
+          <Text style={[styles.column, menuTableStyles.stockColumn]}>STOCK</Text>
+          <Text style={[styles.column, menuTableStyles.statusColumn]}>STATUS</Text>
+          {canManage ? <Text style={[styles.column, menuTableStyles.actionsColumn]}>ACTIONS</Text> : null}
+        </View>
+        {visible.map((item) => <View key={item.id} style={styles.tableRow}>
+          <View style={[styles.productCell, menuTableStyles.itemColumn]}>
+            {item.image_url ? <Image source={{ uri: item.image_url }} style={styles.productImage} /> : <View style={styles.productFallback}><Ionicons name="restaurant-outline" size={20} color="#68ECCB" /></View>}
+            <View style={{ flex: 1 }}><Text style={styles.rowTitle}>{item.name}</Text><Text style={styles.muted}>{item.meal_plan_eligible ? 'Meal-plan eligible' : 'Cash/card item'}</Text></View>
+          </View>
+          <Text style={[styles.tableText, menuTableStyles.periodColumn]}>{categoriesFor(item).join(' + ')}</Text>
+          <Text style={[styles.amount, menuTableStyles.priceColumn]}>{money(item.price)}</Text>
+          <TextInput editable={canManage} defaultValue={item.stock_quantity == null ? '' : String(item.stock_quantity)} placeholder="Unlimited" placeholderTextColor="#98A2AE" keyboardType="numeric" onEndEditing={(event) => { const raw = event.nativeEvent.text.trim(); void update(item.id, { stock_quantity: raw ? Math.max(0, Number(raw) || 0) : null }, `${item.name} stock saved.`); }} style={[styles.stockInput, menuTableStyles.stockColumn]} />
+          <View style={menuTableStyles.statusColumn}><StatusPill status={item.status} /></View>
+          {canManage ? <View style={[styles.rowActions, menuTableStyles.actionsColumn]}>
+            <TouchableOpacity style={styles.iconButton} onPress={() => void move(item, -1)}><Ionicons name="arrow-up" size={17} color="#176E73" /></TouchableOpacity>
+            <TouchableOpacity style={styles.iconButton} onPress={() => void move(item, 1)}><Ionicons name="arrow-down" size={17} color="#176E73" /></TouchableOpacity>
+            <TouchableOpacity style={styles.iconButton} onPress={() => onEdit(item)}><Ionicons name="pencil-outline" size={17} color="#176E73" /></TouchableOpacity>
+            <TouchableOpacity style={styles.iconButton} onPress={() => void update(item.id, { status: item.status === 'available' ? 'sold_out' : 'available' }, `${item.name} is now ${item.status === 'available' ? 'sold out' : 'available'}.`)}><Ionicons name={item.status === 'available' ? 'close-outline' : 'checkmark-outline'} size={18} color="#176E73" /></TouchableOpacity>
+            <TouchableOpacity style={styles.iconButton} onPress={() => void update(item.id, { status: item.status === 'hidden' ? 'available' : 'hidden' }, `${item.name} visibility updated.`)}><Ionicons name={item.status === 'hidden' ? 'eye-outline' : 'eye-off-outline'} size={17} color="#176E73" /></TouchableOpacity>
+            <TouchableOpacity style={[styles.iconButton, styles.deleteButton]} onPress={() => remove(item)}><Ionicons name="trash-outline" size={17} color="#B44646" /></TouchableOpacity>
+          </View> : null}
+        </View>)}
+        {!visible.length ? <Empty icon="restaurant-outline" title="No items here yet" copy="Add the first product for this service period." /> : null}
+      </View>
+    </ScrollView>
   </>;
 }
 
@@ -681,6 +711,15 @@ function ToggleRow({ label, copy, value, disabled, onPress }: { label: string; c
 function Field({ label, large, half, ...props }: { label: string; large?: boolean; half?: boolean; [key: string]: any }) { return <View style={[styles.field, half && { flex: 1 }]}><Text style={styles.fieldLabel}>{label}</Text><TextInput {...props} placeholderTextColor="#98A2AE" style={[styles.input, large && styles.largeInput]} /></View>; }
 function DesktopPrompt() { return <View style={styles.center}><Ionicons name="desktop-outline" size={47} color="#68ECCB" /><Text style={styles.accessTitle}>Continue on desktop</Text><Text style={styles.accessCopy}>The cafeteria operations workspace needs a wider screen for live orders, menu controls, and reporting.</Text></View>; }
 function AccessPrompt({ onReturn }: { onReturn: () => void }) { return <View style={styles.center}><Ionicons name="lock-closed-outline" size={43} color="#68ECCB" /><Text style={styles.accessTitle}>Cafeteria access is not linked yet</Text><Text style={styles.accessCopy}>Ask an AOM administrator to add this account to cafeteria staff and choose its role.</Text><TouchableOpacity onPress={onReturn} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Return to AOM</Text></TouchableOpacity></View>; }
+
+const menuTableStyles = StyleSheet.create({
+  itemColumn: { width: 340, flexGrow: 1 },
+  periodColumn: { width: 150 },
+  priceColumn: { width: 120 },
+  stockColumn: { width: 140 },
+  statusColumn: { width: 148, justifyContent: 'center' },
+  actionsColumn: { width: 238, flexDirection: 'row' },
+});
 
 const styles = StyleSheet.create({
   topbarCompact: { height: 64, paddingHorizontal: 16 },
