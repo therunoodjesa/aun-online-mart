@@ -178,16 +178,24 @@ export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delive
   }
   const lines = [...regularLines, ...cafeteriaLines];
   const subtotal = lines.reduce((total, line) => total + line.unit_price * line.quantity, 0);
-  const marketplaceSubtotal = regularLines.reduce((total, line) => total + line.unit_price * line.quantity, 0);
-  // AOM charges 10% on marketplace merchandise, capped at ₦15,000 for
-  // orders with a subtotal of ₦150,000 or more.
-  const serviceFee = Math.min(15_000, Math.round(marketplaceSubtotal * 0.1));
   const packagingFee = cafeteriaLines.reduce((total, line) => total + line.packaging_fee, 0);
   const mealPlanCredit = cafeteriaLines.reduce((total, line) => total + line.meal_plan_credit, 0);
   const vendorIds = [...new Set(products.map((product) => product.vendor_id).filter(Boolean))] as string[];
   const { data: vendorRows, error: vendorLocationError } = vendorIds.length
-    ? await db.from('vendors').select('id, operating_location').in('id', vendorIds)
-    : { data: [] as { id: string; operating_location: string | null }[], error: null };
+    ? await db.from('vendors').select('id, operating_location, commission_rate').in('id', vendorIds)
+    : { data: [] as { id: string; operating_location: string | null; commission_rate: number | null }[], error: null };
+  // Each vendor may have a custom rate in the database. Older stores and
+  // stores without a custom rate continue to use AOM's standard 10% rate.
+  const commissionByVendor = new Map((vendorRows ?? []).map((vendor) => {
+    const candidate = Number(vendor.commission_rate);
+    const commissionRate = Number.isFinite(candidate) && candidate >= 0 && candidate <= 100 ? candidate : 10;
+    return [vendor.id, commissionRate];
+  }));
+  const serviceFee = Math.min(15_000, Math.round(regularLines.reduce((total, line) => {
+    const vendorId = line.product_id ? byId.get(line.product_id)?.vendor_id : null;
+    const commissionRate = vendorId ? commissionByVendor.get(vendorId) ?? 10 : 10;
+    return total + (line.unit_price * line.quantity * commissionRate) / 100;
+  }, 0)));
   // Keep unclassified or legacy vendors on the existing rate. The campus rate
   // only applies when every product has a vendor and every represented vendor
   // is explicitly tagged as operating on campus.
