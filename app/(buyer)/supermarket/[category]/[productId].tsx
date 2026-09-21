@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Dispatch, SetStateAction, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,7 +15,8 @@ const COLORS = { navy: '#01193D', mint: '#68ECCB', cream: '#F8F3ED', white: '#FF
 const FALLBACK_IMAGE = require('../../../../assets/images/home/all-products.png');
 
 type Product = { id: string; vendor_id: string | null; name: string; description: string | null; price: number; image_url: string | null; category: string | null; status: string };
-type ProductOption = { id: string; option_group: string; name: string; price_modifier: number; color_hex?: string | null; is_available: boolean };
+type ProductOption = { id: string; option_group: string; name: string; price_modifier: number; color_hex?: string | null; is_available: boolean; selection_mode?: 'multiple' | 'single' };
+type QuantityMap = Record<string, number>;
 
 const money = (value: number) => `₦${Number(value || 0).toLocaleString('en-NG')}`;
 const colourValue = (name: string) => {
@@ -23,6 +24,24 @@ const colourValue = (name: string) => {
   const named: Record<string, string> = { black: '#161616', white: '#FAF8F3', cream: '#F5EBDD', beige: '#D6B58C', brown: '#805333', blue: '#6E97CD', navy: '#01193D', green: '#00694D', red: '#C84D4D', pink: '#EA83A6', purple: '#765B9E', yellow: '#FFD34D', orange: '#E68031', grey: '#8C929B', gray: '#8C929B', silver: '#C8CCD2', gold: '#C6A25A' };
   return named[name.trim().toLowerCase()] ?? '#A8B2C1';
 };
+const isShadeGroup = (group: string) => /colou?r|shade|finish/i.test(group);
+
+function SupermarketOptionGroups({ groups, singleSelections, setSingleSelections, quantities, changeQuantity }: { groups: [string, ProductOption[]][]; singleSelections: Record<string, string>; setSingleSelections: Dispatch<SetStateAction<Record<string, string>>>; quantities: QuantityMap; changeQuantity: (id: string, amount: number) => void }) {
+  return <>{groups.map(([group, choices]) => {
+    const isSingleChoice = choices.some((choice) => choice.selection_mode === 'single');
+    return <View key={group}>
+      <Text style={styles.sectionTitle}>{isSingleChoice ? 'CHOOSE ONE ' + group.toUpperCase() : 'CHOOSE ' + group.toUpperCase()}</Text>
+      <View style={styles.optionList}>{choices.map((choice) => {
+        const choiceQuantity = quantities[choice.id] ?? 0;
+        const selected = isSingleChoice ? singleSelections[group] === choice.id : choiceQuantity > 0;
+        return <TouchableOpacity key={choice.id} disabled={!isSingleChoice} onPress={() => isSingleChoice && setSingleSelections((current) => ({ ...current, [group]: choice.id }))} style={[styles.optionRow, selected && styles.optionRowSelected]}>
+          <Text style={styles.optionName}>{choice.name}</Text>
+          <View style={styles.optionRight}><Text style={styles.optionPrice}>{choice.price_modifier ? '+' + money(choice.price_modifier) : 'Included'}</Text>{isSingleChoice ? <View style={[styles.radio, selected && styles.radioSelected]}>{selected ? <View style={styles.radioDot} /> : null}</View> : <View style={styles.optionCounter}><TouchableOpacity onPress={() => changeQuantity(choice.id, -1)} style={styles.optionCounterButton}><Ionicons name="remove" size={13} color="#176E73" /></TouchableOpacity><Text style={styles.optionCount}>{choiceQuantity}</Text><TouchableOpacity onPress={() => changeQuantity(choice.id, 1)} style={styles.optionCounterButton}><Ionicons name="add" size={13} color="#176E73" /></TouchableOpacity></View>}</View>
+        </TouchableOpacity>;
+      })}</View>
+    </View>;
+  })}</>;
+}
 
 export default function SupermarketProductPage() {
   const router = useRouter();
@@ -33,6 +52,8 @@ export default function SupermarketProductPage() {
   const [recommended, setRecommended] = useState<Product[]>([]);
   const [quantity, setQuantity] = useState(1);
   const [selectedColour, setSelectedColour] = useState<string | null>(null);
+  const [singleSelections, setSingleSelections] = useState<Record<string, string>>({});
+  const [optionQuantities, setOptionQuantities] = useState<QuantityMap>({});
   const [note, setNote] = useState('');
   const [favourite, setFavourite] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -48,12 +69,12 @@ export default function SupermarketProductPage() {
       const item = data as Product;
       void recordJourneyEvent('product_viewed', `/supermarket/${category ?? 'all-products'}/${item.id}`, { product_id: item.id, product_name: item.name, category: item.category ?? 'supermarket' });
       const [{ data: optionRows }, { data: relatedRows }] = await Promise.all([
-        supabase.from('product_options').select('id, option_group, name, price_modifier, color_hex, is_available').eq('product_id', item.id).eq('is_available', true),
+        supabase.from('product_options').select('id, option_group, name, price_modifier, color_hex, is_available, selection_mode').eq('product_id', item.id).eq('is_available', true),
         supabase.from('products').select('id, vendor_id, name, description, price, image_url, category, status').eq('status', 'available').is('marketplace_category', null).eq('category', item.category ?? '').neq('id', item.id).limit(6),
       ]);
       if (!mounted) return;
       const availableOptions = (optionRows ?? []) as ProductOption[];
-      const colourOptions = availableOptions.filter((option) => /colou?r|shade|finish/i.test(option.option_group));
+      const colourOptions = availableOptions.filter((option) => isShadeGroup(option.option_group));
       setProduct(item);
       setOptions(availableOptions);
       setRecommended((relatedRows ?? []) as Product[]);
@@ -65,26 +86,30 @@ export default function SupermarketProductPage() {
     return () => { mounted = false; };
   }, [productId]);
 
-  const colourOptions = useMemo(() => options.filter((option) => /colou?r|shade|finish/i.test(option.option_group)), [options]);
+  const colourOptions = useMemo(() => options.filter((option) => isShadeGroup(option.option_group)), [options]);
+  const optionGroups = useMemo(() => Array.from(options.filter((option) => !isShadeGroup(option.option_group)).reduce((groups, option) => { const group = option.option_group.trim() || 'Options'; groups.set(group, [...(groups.get(group) ?? []), option]); return groups; }, new Map<string, ProductOption[]>()).entries()), [options]);
   const selectedOption = colourOptions.find((option) => option.id === selectedColour) ?? null;
-  const unitPrice = (product?.price ?? 0) + (selectedOption?.price_modifier ?? 0);
+  const selectedChoices = options.filter((option) => isShadeGroup(option.option_group) ? option.id === selectedColour : option.selection_mode === 'single' ? singleSelections[option.option_group.trim() || 'Options'] === option.id : (optionQuantities[option.id] ?? 0) > 0);
+  const unitPrice = (product?.price ?? 0) + selectedChoices.reduce((total, option) => total + Number(option.price_modifier) * (option.selection_mode === 'single' || isShadeGroup(option.option_group) ? 1 : optionQuantities[option.id] ?? 0), 0);
   const total = unitPrice * quantity;
   const goBack = () => router.canGoBack() ? router.back() : router.replace({ pathname: '/(buyer)/supermarket/[category]', params: { category: category || 'all-products' } });
+  const changeOptionQuantity = (id: string, amount: number) => setOptionQuantities((current) => ({ ...current, [id]: Math.max(0, (current[id] ?? 0) + amount) }));
   const addToCart = async () => {
     if (!product) return;
     if (product.vendor_id && !(await vendorCanAcceptOrders(product.vendor_id))) {
       Alert.alert('Store closed', 'This vendor is outside their ordering hours. You can keep browsing and return when the store reopens.');
       return;
     }
-    const variant = selectedOption ? ` · ${selectedOption.name}` : '';
+    const selection = selectedChoices.map((option) => option.selection_mode === 'single' || isShadeGroup(option.option_group) ? option.name : `${option.name} ×${optionQuantities[option.id]}`).join(' · ');
+    const selectionKey = options.map((option) => `${option.id}-${isShadeGroup(option.option_group) || option.selection_mode === 'single' ? (selectedChoices.some((choice) => choice.id === option.id) ? 1 : 0) : optionQuantities[option.id] ?? 0}`).join(':');
     for (let item = 0; item < quantity; item += 1) {
       addItem({
-        productId: `${product.id}:${selectedOption?.id ?? 'default'}:${note.trim() || 'no-note'}`,
-        name: `${product.name}${variant}`,
+        productId: `${product.id}:${selectionKey || 'default'}:${note.trim() || 'no-note'}`,
+        name: `${product.name}${selection ? ` · ${selection}` : ''}`,
         category: product.category,
         price: unitPrice,
         imageUrl: product.image_url,
-        selectedOptions: selectedOption ? [{ id: selectedOption.id, name: selectedOption.name, quantity: 1, priceModifier: Number(selectedOption.price_modifier) }] : [],
+        selectedOptions: selectedChoices.map((option) => ({ id: option.id, name: option.name, quantity: option.selection_mode === 'single' || isShadeGroup(option.option_group) ? 1 : optionQuantities[option.id] ?? 0, priceModifier: Number(option.price_modifier) })),
         note: note.trim() || null,
       });
     }
@@ -107,6 +132,7 @@ export default function SupermarketProductPage() {
         <View style={styles.titleRow}><Text style={styles.name}>{product.name}</Text><Text style={styles.price}>{money(unitPrice)}</Text></View>
         <Text style={styles.category}>{product.category || 'Supermarket item'}</Text>
         {colourOptions.length > 0 && <View style={styles.colours}><View><Text style={styles.sectionTitle}>COLOUR</Text><Text style={styles.selectedColour}>{selectedOption?.name ?? 'Select a colour'}</Text></View><View style={styles.swatches}>{colourOptions.map((option) => <TouchableOpacity key={option.id} onPress={() => setSelectedColour(option.id)} style={[styles.swatch, { backgroundColor: option.color_hex || colourValue(option.name) }, selectedColour === option.id && styles.swatchSelected]} accessibilityLabel={`Select ${option.name}`} />)}</View></View>}
+        <SupermarketOptionGroups groups={optionGroups} singleSelections={singleSelections} setSingleSelections={setSingleSelections} quantities={optionQuantities} changeQuantity={changeOptionQuantity} />
         <View style={styles.divider} />
         <Text style={styles.sectionTitle}>PRODUCT DETAILS</Text>
         {product.description?.trim() ? <Text style={styles.description}>{product.description}</Text> : null}
@@ -121,6 +147,7 @@ export default function SupermarketProductPage() {
 }
 
 const styles = StyleSheet.create({
+  optionList: { gap: 8 }, optionRow: { minHeight: 49, paddingHorizontal: 13, borderWidth: 1, borderColor: COLORS.line, borderRadius: 11, backgroundColor: '#F7F9FB', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }, optionRowSelected: { borderColor: '#176E73', backgroundColor: '#EAF7F4' }, optionName: { flex: 1, color: COLORS.navy, fontSize: 15, fontWeight: '700' }, optionRight: { flexDirection: 'row', alignItems: 'center', gap: 10 }, optionPrice: { color: '#176E73', fontSize: 12, fontWeight: '800' }, radio: { width: 21, height: 21, borderRadius: 11, borderWidth: 2, borderColor: '#9BA8B8', alignItems: 'center', justifyContent: 'center' }, radioSelected: { borderColor: '#176E73' }, radioDot: { width: 11, height: 11, borderRadius: 6, backgroundColor: '#176E73' }, optionCounter: { minWidth: 76, height: 28, borderRadius: 14, borderWidth: 1, borderColor: '#B8C6D3', backgroundColor: COLORS.white, paddingHorizontal: 3, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, optionCounterButton: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#E1F6F0', alignItems: 'center', justifyContent: 'center' }, optionCount: { minWidth: 16, textAlign: 'center', color: COLORS.navy, fontSize: 13, fontWeight: '800' },
   screen: { flex: 1, backgroundColor: COLORS.white },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.navy, gap: 14 },
   unavailable: { color: COLORS.white, fontSize: 19, fontWeight: '700' }, return: { color: COLORS.mint, fontSize: 16, fontWeight: '700' }, content: { paddingBottom: 114 },
