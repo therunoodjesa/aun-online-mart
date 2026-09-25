@@ -1,8 +1,13 @@
 import { corsHeaders, getUser, json, admin, paystack, priceCart } from '../_shared/paystack.ts';
 
+// AOM has temporarily paused new Paystack payments. Existing payment intents
+// can still be verified or handled by the webhook.
+const PAYSTACK_PAYMENTS_ENABLED = false;
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
+    if (!PAYSTACK_PAYMENTS_ENABLED) return json({ error: 'Paystack payments are temporarily unavailable. Please use bank transfer or AOM Credit.' }, 503);
     const user = await getUser(request);
     if (!user) return json({ error: 'Please sign in before paying.' }, 401);
     const body = await request.json();
