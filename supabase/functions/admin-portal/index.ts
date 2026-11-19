@@ -7,6 +7,7 @@ type AdminRequest =
   | { action: 'cancel_transfer'; intent_id: string }
   | { action: 'review_vendor'; application_id: string; decision: 'approved' | 'rejected'; reviewer_note?: string }
   | { action: 'update_payout'; payout_id: string; status: 'processing' | 'paid' | 'rejected'; note?: string }
+  | { action: 'update_refund_request'; refund_request_id: string; status: 'paid' | 'rejected'; note?: string }
   | { action: 'assign_dispatch'; order_id: string; rider_name: string; rider_phone: string }
   | { action: 'update_dispatch'; order_id: string; status: 'picked_up' | 'delivered' }
   | { action: 'review_meal_plan'; user_id: string; decision: 'approved' | 'declined' }
@@ -36,6 +37,29 @@ async function creditWallet(db: ReturnType<typeof admin>, administratorId: strin
   if (error) throw new Error(error.message);
   await db.from('notifications').insert({ user_id: customer.id, title: 'AOM Credit added', body: `₦${amount.toLocaleString('en-NG')} was added to your AOM Credit. ${description}`, message: 'AOM Credit has been added to your account.', kind: 'promotion', action_label: 'VIEW AOM CREDIT', action_href: '/(buyer)/wallet' });
   return { customer_name: customer.full_name ?? 'Customer', amount };
+}
+
+async function updateRefundRequest(db: ReturnType<typeof admin>, administratorId: string, requestId: string, status: 'paid' | 'rejected', note?: string) {
+  const { data: request, error: requestError } = await db.from('order_refund_requests')
+    .select('id, order_id, user_id, amount, status, bank_name, account_name, account_number, orders(order_number)')
+    .eq('id', requestId).maybeSingle();
+  if (requestError || !request) throw new Error(requestError?.message ?? 'Refund request not found.');
+  if (request.status !== 'pending_bank_transfer') throw new Error('This bank refund has already been reviewed.');
+  const adminNote = note?.trim().slice(0, 300) || null;
+  const { error: updateError } = await db.from('order_refund_requests').update({
+    status, processed_at: new Date().toISOString(), processed_by: administratorId, admin_note: adminNote,
+  }).eq('id', request.id).eq('status', 'pending_bank_transfer');
+  if (updateError) throw new Error(updateError.message);
+  const orderNumber = (request.orders as { order_number?: string } | null)?.order_number ?? 'your order';
+  const amount = Number(request.amount);
+  const message = status === 'paid'
+    ? `Your ₦${amount.toLocaleString('en-NG')} bank refund for ${orderNumber} has been sent.`
+    : `Your bank refund request for ${orderNumber} needs attention. Please contact AOM support.`;
+  await Promise.all([
+    db.from('order_updates').insert({ order_id: request.order_id, message, update_type: 'system' }),
+    db.from('notifications').insert({ user_id: request.user_id, title: status === 'paid' ? 'Bank refund sent' : 'Bank refund needs attention', body: message, message, kind: 'order', action_label: 'VIEW ORDER', action_href: `/(buyer)/order/${request.order_id}` }),
+  ]);
+  return { status, amount, order_number: orderNumber };
 }
 
 async function dashboard(db: ReturnType<typeof admin>) {
@@ -69,6 +93,20 @@ async function dashboard(db: ReturnType<typeof admin>) {
   ]);
   if (mealPlanCountError) throw new Error(mealPlanCountError.message);
   if (mealPlanRowsError) throw new Error(mealPlanRowsError.message);
+  const { data: refundRows, error: refundError } = await db.from('order_refund_requests')
+    .select('id, order_id, user_id, amount, bank_name, account_name, account_number, created_at')
+    .eq('destination', 'bank_transfer').eq('status', 'pending_bank_transfer').order('created_at', { ascending: true }).limit(50);
+  if (refundError) throw new Error(refundError.message);
+  const refundOrderIds = [...new Set((refundRows ?? []).map((request) => request.order_id))];
+  const refundUserIds = [...new Set((refundRows ?? []).map((request) => request.user_id))];
+  const [{ data: refundOrders, error: refundOrdersError }, { data: refundProfiles, error: refundProfilesError }] = await Promise.all([
+    refundOrderIds.length ? db.from('orders').select('id, order_number').in('id', refundOrderIds) : Promise.resolve({ data: [], error: null }),
+    refundUserIds.length ? db.from('profiles').select('id, full_name, phone').in('id', refundUserIds) : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (refundOrdersError) throw new Error(refundOrdersError.message);
+  if (refundProfilesError) throw new Error(refundProfilesError.message);
+  const refundOrderById = new Map((refundOrders ?? []).map((order) => [order.id, order]));
+  const refundProfileById = new Map((refundProfiles ?? []).map((profile) => [profile.id, profile]));
   const mealPlanUserIds = (mealPlanRows ?? []).map((row) => row.user_id);
   const { data: mealPlanProfiles, error: mealPlanProfilesError } = mealPlanUserIds.length
     ? await db.from('profiles').select('id, full_name, phone, student_id, age, school_year').in('id', mealPlanUserIds)
@@ -177,11 +215,12 @@ async function dashboard(db: ReturnType<typeof admin>) {
     .slice(0, 5);
 
   return {
-    metrics: { pending_transfers: pendingTransferCount ?? 0, pending_vendor_applications: pendingVendorCount ?? 0, pending_meal_plan_requests: pendingMealPlanCount ?? 0, paid_orders: paidOrderCount ?? 0, pending_payouts: pendingPayoutCount ?? 0, dispatch_queue: dispatchCount ?? 0, gross_sales: grossSales, sales_last_30_days: salesLast30Days, average_order_value: (salesOrders ?? []).length ? Math.round(grossSales / (salesOrders ?? []).length) : 0, partner_vendors: vendorCount ?? 0, top_vendors: topVendors },
+    metrics: { pending_transfers: pendingTransferCount ?? 0, pending_vendor_applications: pendingVendorCount ?? 0, pending_meal_plan_requests: pendingMealPlanCount ?? 0, pending_bank_refunds: (refundRows ?? []).length, paid_orders: paidOrderCount ?? 0, pending_payouts: pendingPayoutCount ?? 0, dispatch_queue: dispatchCount ?? 0, gross_sales: grossSales, sales_last_30_days: salesLast30Days, average_order_value: (salesOrders ?? []).length ? Math.round(grossSales / (salesOrders ?? []).length) : 0, partner_vendors: vendorCount ?? 0, top_vendors: topVendors },
     pending_transfers: (intents ?? []).map((intent) => ({ ...intent, delivery_address: [intent.delivery_address, intent.delivery_instructions].filter(Boolean).join(' · ') || null, customer: transferProfileByUserId.get(intent.user_id) ?? { full_name: 'Customer', phone: null }, order: intent.order_id ? orderById.get(intent.order_id) ?? null : null })),
     pending_vendor_applications: applications ?? [],
     pending_meal_plan_requests: (mealPlanRows ?? []).map((request) => ({ ...request, profile: mealPlanProfileById.get(request.user_id) ?? null })),
     pending_payouts: (payoutRows ?? []).map((payout) => ({ ...payout, vendor: vendorById.get(payout.vendor_id) ?? null })),
+    pending_bank_refunds: (refundRows ?? []).map((request) => ({ ...request, order: refundOrderById.get(request.order_id) ?? null, customer: refundProfileById.get(request.user_id) ?? { full_name: 'Customer', phone: null } })),
     dispatch_queue: (dispatchRows ?? []).map((order) => ({ ...order, delivery_address: [order.delivery_address, order.delivery_instructions].filter(Boolean).join(' · ') || null })),
     delivery_riders: riderRows ?? [],
     orders: adminOrders,
@@ -479,6 +518,7 @@ Deno.serve(async (request) => {
     if (body.action === 'confirm_transfer') return json(await confirmTransfer(db, body.intent_id));
     if (body.action === 'cancel_transfer') return json(await cancelTransfer(db, body.intent_id));
     if (body.action === 'update_payout') return json(await updatePayout(db, body.payout_id, body.status, body.note));
+    if (body.action === 'update_refund_request') return json(await updateRefundRequest(db, user.id, body.refund_request_id, body.status, body.note));
     if (body.action === 'assign_dispatch') return json(await assignDispatch(db, body.order_id, body.rider_name, body.rider_phone));
     if (body.action === 'update_dispatch') return json(await updateDispatch(db, body.order_id, body.status));
     if (body.action === 'update_home_promo') return json(await updateHomePromo(db, body.promotion));
