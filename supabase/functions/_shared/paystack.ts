@@ -107,7 +107,7 @@ export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delive
   const shortCafeteriaProduct = cafeteriaProducts.find((product) => product.stock_quantity !== null && Number(product.stock_quantity) < (cafeteriaRequested.get(product.id) ?? 0));
   if (shortCafeteriaProduct) throw new Error(`${shortCafeteriaProduct.name} does not have enough stock for this order. Please adjust your cart.`);
   const [{ data: options }, { data: cafeteriaOptions }] = await Promise.all([
-    ids.length ? db.from('product_options').select('id, product_id, name, price_modifier, is_available').in('product_id', ids).eq('is_available', true) : Promise.resolve({ data: [] }),
+    ids.length ? db.from('product_options').select('id, product_id, option_group, name, price_modifier, is_available').in('product_id', ids).eq('is_available', true) : Promise.resolve({ data: [] }),
     cafeteriaIds.length ? db.from('cafeteria_product_options').select('id, product_id, option_group, name, price_modifier, is_available').in('product_id', cafeteriaIds).eq('is_available', true) : Promise.resolve({ data: [] }),
   ]);
   const byId = new Map(products.map((product) => [product.id, product]));
@@ -116,13 +116,13 @@ export async function priceCart(rawItems: RawCheckoutItem[], fulfilment: 'delive
     const productId = item.productId.slice(0, 36);
     const product = byId.get(productId)!;
     const requestedOptions = Array.isArray(item.selectedOptions) ? item.selectedOptions : legacyOptionSelections(item.productId);
-    const selected: { id: string; name: string; quantity: number; price_modifier: number }[] = [];
+    const selected: { id: string; group: string; name: string; quantity: number; price_modifier: number }[] = [];
     for (const selection of requestedOptions) {
       const option = optionsById.get(String(selection.id));
       const quantity = Math.max(0, Math.floor(Number(selection.quantity ?? 1)));
       if (quantity <= 0) continue;
       if (!option || option.product_id !== product.id) throw new Error(`A selected option for ${product.name} is no longer available. Please reopen the item and choose again.`);
-      selected.push({ id: option.id, name: option.name, quantity, price_modifier: Number(option.price_modifier) });
+      selected.push({ id: option.id, group: option.option_group, name: option.name, quantity, price_modifier: Number(option.price_modifier) });
     }
     const unitPrice = Number(product.price) + selected.reduce((total, option) => total + option.price_modifier * option.quantity, 0);
     return { source: 'marketplace', product_id: product.id, cafeteria_product_id: null, product_name: product.name, unit_price: unitPrice, quantity: Math.floor(item.quantity), selected_options: selected, note: typeof item.note === 'string' && item.note.trim() ? item.note.trim().slice(0, 500) : null, meal_plan_credit: 0, packaging_fee: 0 };
